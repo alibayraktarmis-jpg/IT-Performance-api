@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Dapper;
 using ITPerformansAPI.Models;
@@ -23,14 +24,18 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpGet]
+        [Authorize]
         public IActionResult GetAll()
         {
             using var connection = new SqlConnection(_connectionString);
-            var liste = connection.Query<Kullanici>("SELECT * FROM Kullanicilar").ToList();
+            var liste = connection.Query<Kullanici>(
+                "SELECT Id, Ad, Soyad, Email, Rol, Departman, AktifMi FROM Kullanicilar"
+            ).ToList();
             return Ok(liste);
         }
 
         [HttpGet("{id}")]
+        [Authorize]
         public IActionResult GetKullaniciById(int id)
         {
             using var connection = new SqlConnection(_connectionString);
@@ -40,6 +45,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpPost]
+        [Authorize(Roles = "Admin")]
         public IActionResult CreateKullanici([FromBody] Kullanici yeniKullanici)
         {
             using var connection = new SqlConnection(_connectionString);
@@ -86,11 +92,13 @@ namespace ITPerformansAPI.Controllers
                 token = new JwtSecurityTokenHandler().WriteToken(token),
                 kullanici.Id,
                 kullanici.Ad,
+                kullanici.Soyad,
                 kullanici.Rol
             });
         }
 
         [HttpPut("{id}")]
+        [Authorize]
         public IActionResult UpdateKullanici(int id, [FromBody] Kullanici guncelKullanici)
         {
             using var connection = new SqlConnection(_connectionString);
@@ -102,11 +110,22 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Roles = "Admin")]
         public IActionResult DeleteKullanici(int id)
         {
             using var connection = new SqlConnection(_connectionString);
             connection.Execute("DELETE FROM Kullanicilar WHERE Id=@Id", new { Id = id });
             return Ok(new { mesaj = "Kullanici silindi" });
+        }
+
+        [HttpPatch("{id}/aktif")]
+        [Authorize]
+        public IActionResult AktifPasifYap(int id, [FromBody] bool aktifMi)
+        {
+            using var connection = new SqlConnection(_connectionString);
+            var sql = "UPDATE Kullanicilar SET AktifMi = @AktifMi WHERE Id = @Id";
+            connection.Execute(sql, new { AktifMi = aktifMi, Id = id });
+            return Ok(new { mesaj = aktifMi ? "Kullanici aktif edildi" : "Kullanici pasif edildi" });
         }
     }
 }
