@@ -27,11 +27,23 @@ namespace ITPerformansAPI.Controllers
         [Authorize]
         public IActionResult GetAll()
         {
+            var rol = User.FindFirst(ClaimTypes.Role)?.Value;
+            var kullaniciId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
+
             using var connection = new SqlConnection(_connectionString);
-            var liste = connection.Query<Kullanici>(
+
+            if (rol == "Evaluator")
+            {
+                var liste = connection.Query<Kullanici>(
+                    "SELECT Id, Ad, Soyad, Email, Rol, Departman, AktifMi FROM Kullanicilar WHERE Rol = 'Employee' AND EvaluatorId = @Id",
+                    new { Id = kullaniciId }).ToList();
+                return Ok(liste);
+            }
+
+            var tumListe = connection.Query<Kullanici>(
                 "SELECT Id, Ad, Soyad, Email, Rol, Departman, AktifMi FROM Kullanicilar"
             ).ToList();
-            return Ok(liste);
+            return Ok(tumListe);
         }
 
         [HttpGet("{id}")]

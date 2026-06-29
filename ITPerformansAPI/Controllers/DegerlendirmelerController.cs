@@ -4,6 +4,9 @@ using Microsoft.Data.SqlClient;
 using Dapper;
 using ITPerformansAPI.Models;
 using System.Security.Claims;
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
+using QuestPDF.Infrastructure;
 
 namespace ITPerformansAPI.Controllers
 {
@@ -86,13 +89,21 @@ namespace ITPerformansAPI.Controllers
             return Ok(new { mesaj = "Degerlendirme silindi" });
         }
 
+        [HttpGet("donemler")]
+        public IActionResult GetDonemler()
+        {
+            using var connection = new SqlConnection(_connectionString);
+            var donemler = connection.Query<string>("SELECT DISTINCT Donem FROM Degerlendirmeler WHERE Donem IS NOT NULL AND Donem != '' ORDER BY Donem DESC").ToList();
+            return Ok(donemler);
+        }
+
         [HttpGet("skor/{calisanId}")]
-        public IActionResult ToplamSkorHesapla(int calisanId)
+        public IActionResult ToplamSkorHesapla(int calisanId, [FromQuery] string? donem = null)
         {
             using var connection = new SqlConnection(_connectionString);
 
             var sql = @"
-                SELECT 
+                SELECT
                     ab.Baslik,
                     ab.AgirlikYuzdesi,
                     AVG(CAST(dd.Puan AS FLOAT)) AS OrtalmaPuan
@@ -101,14 +112,15 @@ namespace ITPerformansAPI.Controllers
                 INNER JOIN AnaBasliklar ab ON ak.AnaBaslikId = ab.Id
                 INNER JOIN Degerlendirmeler d ON dd.DegerlendirmeId = d.Id
                 WHERE d.CalisanId = @CalisanId
+                " + (donem != null ? "AND d.Donem = @Donem" : "") + @"
                 GROUP BY ab.Baslik, ab.AgirlikYuzdesi";
 
-            var kategoriSkorlar = connection.Query(sql, new { CalisanId = calisanId }).ToList();
+            var kategoriSkorlar = connection.Query(sql, new { CalisanId = calisanId, Donem = donem }).ToList();
 
             double toplamSkor = 0;
             foreach (var kategori in kategoriSkorlar)
             {
-                double kategorSkor = (kategori.AgirlikYuzdesi / 100.0) * kategori.OrtalmaPuan;
+                double kategorSkor = (kategori.AgirlikYuzdesi / 100.0) * (kategori.OrtalmaPuan / 5.0) * 100.0;
                 toplamSkor += kategorSkor;
             }
 
@@ -121,49 +133,50 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpGet("siralama")]
-        public IActionResult GetSiralama()
+        public IActionResult GetSiralama([FromQuery] string? donem = null)
         {
             var rol = User.FindFirst(ClaimTypes.Role)?.Value;
             var kullaniciId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
 
             using var connection = new SqlConnection(_connectionString);
 
+            string donemFilter = donem != null ? "AND d.Donem = @Donem" : "";
             string sql;
 
             if (rol == "Admin")
             {
-                sql = @"
+                sql = $@"
                     SELECT k.Id, k.Ad, k.Soyad, k.Departman, k.Rol,
                            AVG(d.ToplamSkor) AS OrtalamaToplamSkor
                     FROM Kullanicilar k
-                    LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId
+                    LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId {donemFilter}
                     GROUP BY k.Id, k.Ad, k.Soyad, k.Departman, k.Rol
                     ORDER BY OrtalamaToplamSkor DESC";
             }
             else if (rol == "Evaluator")
             {
-                sql = @"
+                sql = $@"
                     SELECT k.Id, k.Ad, k.Soyad, k.Departman, k.Rol,
                            AVG(d.ToplamSkor) AS OrtalamaToplamSkor
                     FROM Kullanicilar k
-                    LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId
-                    WHERE d.DegerlendiricId = @KullaniciId
+                    LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId {donemFilter}
+                    WHERE k.Rol = 'Employee' AND k.EvaluatorId = @KullaniciId
                     GROUP BY k.Id, k.Ad, k.Soyad, k.Departman, k.Rol
                     ORDER BY OrtalamaToplamSkor DESC";
             }
             else
             {
-                sql = @"
+                sql = $@"
                     SELECT k.Id, k.Ad, k.Soyad, k.Departman, k.Rol,
                            AVG(d.ToplamSkor) AS OrtalamaToplamSkor
                     FROM Kullanicilar k
-                    LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId
+                    LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId {donemFilter}
                     WHERE k.Id = @KullaniciId
                     GROUP BY k.Id, k.Ad, k.Soyad, k.Departman, k.Rol
                     ORDER BY OrtalamaToplamSkor DESC";
             }
 
-            var sonuc = connection.Query(sql, new { KullaniciId = kullaniciId }).ToList();
+            var sonuc = connection.Query(sql, new { KullaniciId = kullaniciId, Donem = donem }).ToList();
             return Ok(sonuc);
         }
 
@@ -204,6 +217,98 @@ namespace ITPerformansAPI.Controllers
 
             var dosya = paket.GetAsByteArray();
             return File(dosya, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "PerformansRaporu.xlsx");
+        }
+
+        [HttpGet("pdf")]
+        [Authorize(Roles = "Admin")]
+        public IActionResult PdfExport()
+        {
+            QuestPDF.Settings.License = LicenseType.Community;
+
+            using var connection = new SqlConnection(_connectionString);
+            var sql = @"
+                SELECT k.Ad, k.Soyad, k.Departman, k.Rol,
+                       AVG(d.ToplamSkor) AS OrtalamaToplamSkor
+                FROM Kullanicilar k
+                LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId
+                GROUP BY k.Ad, k.Soyad, k.Departman, k.Rol
+                ORDER BY OrtalamaToplamSkor DESC";
+
+            var veriler = connection.Query(sql).ToList();
+
+            var pdf = Document.Create(container =>
+            {
+                container.Page(page =>
+                {
+                    page.Size(PageSizes.A4);
+                    page.Margin(40);
+                    page.DefaultTextStyle(x => x.FontSize(11).FontFamily("Arial"));
+
+                    page.Header().Column(col =>
+                    {
+                        col.Item().Text("IT Departmanı Performans Raporu")
+                            .FontSize(18).Bold().FontColor(Colors.Grey.Darken3);
+                        col.Item().Text($"Oluşturulma Tarihi: {DateTime.Now:dd.MM.yyyy}")
+                            .FontSize(10).FontColor(Colors.Grey.Medium);
+                        col.Item().PaddingTop(8).LineHorizontal(1).LineColor(Colors.Grey.Lighten1);
+                    });
+
+                    page.Content().PaddingTop(20).Table(table =>
+                    {
+                        table.ColumnsDefinition(cols =>
+                        {
+                            cols.ConstantColumn(30);
+                            cols.RelativeColumn(2);
+                            cols.RelativeColumn(2);
+                            cols.RelativeColumn(2);
+                            cols.RelativeColumn(1);
+                        });
+
+                        table.Header(header =>
+                        {
+                            header.Cell().Background(Colors.Indigo.Darken2).Padding(8)
+                                .Text("#").FontColor(Colors.White).Bold();
+                            header.Cell().Background(Colors.Indigo.Darken2).Padding(8)
+                                .Text("Ad Soyad").FontColor(Colors.White).Bold();
+                            header.Cell().Background(Colors.Indigo.Darken2).Padding(8)
+                                .Text("Departman").FontColor(Colors.White).Bold();
+                            header.Cell().Background(Colors.Indigo.Darken2).Padding(8)
+                                .Text("Rol").FontColor(Colors.White).Bold();
+                            header.Cell().Background(Colors.Indigo.Darken2).Padding(8)
+                                .Text("Ortalama Skor").FontColor(Colors.White).Bold();
+                        });
+
+                        for (int i = 0; i < veriler.Count; i++)
+                        {
+                            var v = veriler[i];
+                            var bg = i % 2 == 0 ? Colors.White : Colors.Grey.Lighten4;
+                            double? skor = v.OrtalamaToplamSkor;
+
+                            string ad = $"{v.Ad} {v.Soyad}";
+                            string departman = (string?)v.Departman ?? "-";
+                            string rol = (string?)v.Rol ?? "-";
+                            string skorStr = skor.HasValue ? skor.Value.ToString("F1") : "-";
+
+                            table.Cell().Background(bg).Padding(8).Text((i + 1).ToString());
+                            table.Cell().Background(bg).Padding(8).Text(ad);
+                            table.Cell().Background(bg).Padding(8).Text(departman);
+                            table.Cell().Background(bg).Padding(8).Text(rol);
+                            table.Cell().Background(bg).Padding(8).Text(skorStr);
+                        }
+                    });
+
+                    page.Footer().AlignCenter().Text(t =>
+                    {
+                        t.Span("IT Performans Değerlendirme Sistemi  |  Sayfa ");
+                        t.CurrentPageNumber();
+                        t.Span(" / ");
+                        t.TotalPages();
+                    });
+                });
+            });
+
+            var bytes = pdf.GeneratePdf();
+            return File(bytes, "application/pdf", "PerformansRaporu.pdf");
         }
     }
 }

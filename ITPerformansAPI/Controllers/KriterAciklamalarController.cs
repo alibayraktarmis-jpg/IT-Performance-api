@@ -73,6 +73,32 @@ namespace ITPerformansAPI.Controllers
             return Ok("Guncellendi");
         }
 
+        [HttpPost("kriter/{altKriterId}/upsert")]
+        public IActionResult Upsert(int altKriterId, [FromBody] List<KriterAciklama> aciklamalar)
+        {
+            using var connection = new SqlConnection(_connectionString);
+            foreach (var a in aciklamalar)
+            {
+                var mevcut = connection.QueryFirstOrDefault<KriterAciklama>(
+                    "SELECT * FROM KriterAciklamalar WHERE AltKriterId = @AltKriterId AND Rol = @Rol",
+                    new { AltKriterId = altKriterId, Rol = a.Rol });
+
+                if (mevcut != null)
+                {
+                    connection.Execute(
+                        "UPDATE KriterAciklamalar SET Aciklama = @Aciklama WHERE Id = @Id",
+                        new { Aciklama = a.Aciklama, Id = mevcut.Id });
+                }
+                else if (!string.IsNullOrWhiteSpace(a.Aciklama))
+                {
+                    connection.Execute(
+                        "INSERT INTO KriterAciklamalar (AltKriterId, Rol, Aciklama) VALUES (@AltKriterId, @Rol, @Aciklama)",
+                        new { AltKriterId = altKriterId, Rol = a.Rol, Aciklama = a.Aciklama });
+                }
+            }
+            return Ok(new { mesaj = "Açıklamalar kaydedildi" });
+        }
+
         [HttpDelete("{id}")]
         public IActionResult Delete(int id)
         {

@@ -1,8 +1,9 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Dapper;
 using ITPerformansAPI.Models;
+using System.Security.Claims;
 
 namespace ITPerformansAPI.Controllers
 {
@@ -19,57 +20,72 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpGet]
-        public IActionResult GetAll()
+        public IActionResult GetHedefler()
         {
-            using var connection = new SqlConnection(_connectionString);
-            var liste = connection.Query<Hedef>("SELECT * FROM Hedefler").ToList();
-            return Ok(liste);
-        }
+            var rol = User.FindFirst(ClaimTypes.Role)?.Value;
+            var kullaniciId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
 
-        [HttpGet("{id}")]
-        public IActionResult GetById(int id)
-        {
             using var connection = new SqlConnection(_connectionString);
-            var hedef = connection.QueryFirstOrDefault<Hedef>("SELECT * FROM Hedefler WHERE Id = @Id", new { Id = id });
-            if (hedef == null) return NotFound();
-            return Ok(hedef);
-        }
 
-        [HttpGet("calisan/{calisanId}")]
-        public IActionResult GetByCalisan(int calisanId)
-        {
-            using var connection = new SqlConnection(_connectionString);
-            var liste = connection.Query<Hedef>(
-                "SELECT * FROM Hedefler WHERE CalisanId = @CalisanId",
-                new { CalisanId = calisanId }).ToList();
-            return Ok(liste);
+            if (rol == "Admin" || rol == "Evaluator")
+            {
+                var liste = connection.Query(@"
+                    SELECT h.Id, h.CalisanId, h.Aciklama, h.BitisTarihi, h.TamamlandiMi,
+                           k.Ad, k.Soyad, k.Departman
+                    FROM Hedefler h
+                    INNER JOIN Kullanicilar k ON h.CalisanId = k.Id
+                    ORDER BY h.TamamlandiMi ASC, h.BitisTarihi ASC").ToList();
+                return Ok(liste);
+            }
+            else
+            {
+                var liste = connection.Query(@"
+                    SELECT h.Id, h.CalisanId, h.Aciklama, h.BitisTarihi, h.TamamlandiMi,
+                           k.Ad, k.Soyad, k.Departman
+                    FROM Hedefler h
+                    INNER JOIN Kullanicilar k ON h.CalisanId = k.Id
+                    WHERE h.CalisanId = @KullaniciId
+                    ORDER BY h.TamamlandiMi ASC, h.BitisTarihi ASC",
+                    new { KullaniciId = kullaniciId }).ToList();
+                return Ok(liste);
+            }
         }
 
         [HttpPost]
-        public IActionResult Create([FromBody] Hedef yeni)
+        [Authorize(Roles = "Admin,Evaluator")]
+        public IActionResult CreateHedef([FromBody] Hedef yeni)
         {
             using var connection = new SqlConnection(_connectionString);
-            var sql = "INSERT INTO Hedefler (CalisanId, Aciklama, BitisTarihi, TamamlandiMi) VALUES (@CalisanId, @Aciklama, @BitisTarihi, @TamamlandiMi)";
-            connection.Execute(sql, yeni);
-            return Ok("Eklendi");
+            var sql = @"INSERT INTO Hedefler (CalisanId, Aciklama, BitisTarihi, TamamlandiMi)
+                        OUTPUT INSERTED.Id
+                        VALUES (@CalisanId, @Aciklama, @BitisTarihi, 0)";
+            var yeniId = connection.ExecuteScalar<int>(sql, yeni);
+            return Ok(new { mesaj = "Hedef eklendi", id = yeniId });
         }
 
-        [HttpPut("{id}")]
-        public IActionResult Update(int id, [FromBody] Hedef guncellendi)
+        [HttpPut("{id}/tamamla")]
+        public IActionResult Tamamla(int id)
         {
             using var connection = new SqlConnection(_connectionString);
-            var sql = "UPDATE Hedefler SET CalisanId=@CalisanId, Aciklama=@Aciklama, BitisTarihi=@BitisTarihi, TamamlandiMi=@TamamlandiMi WHERE Id=@Id";
-            guncellendi.Id = id;
-            connection.Execute(sql, guncellendi);
-            return Ok("Guncellendi");
+            connection.Execute("UPDATE Hedefler SET TamamlandiMi = 1 WHERE Id = @Id", new { Id = id });
+            return Ok(new { mesaj = "Tamamlandı" });
+        }
+
+        [HttpPut("{id}/geriAl")]
+        public IActionResult GeriAl(int id)
+        {
+            using var connection = new SqlConnection(_connectionString);
+            connection.Execute("UPDATE Hedefler SET TamamlandiMi = 0 WHERE Id = @Id", new { Id = id });
+            return Ok(new { mesaj = "Geri alındı" });
         }
 
         [HttpDelete("{id}")]
-        public IActionResult Delete(int id)
+        [Authorize(Roles = "Admin,Evaluator")]
+        public IActionResult DeleteHedef(int id)
         {
             using var connection = new SqlConnection(_connectionString);
-            connection.Execute("DELETE FROM Hedefler WHERE Id=@Id", new { Id = id });
-            return Ok("Silindi");
+            connection.Execute("DELETE FROM Hedefler WHERE Id = @Id", new { Id = id });
+            return Ok(new { mesaj = "Hedef silindi" });
         }
     }
 }
