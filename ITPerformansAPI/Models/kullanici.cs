@@ -17,5 +17,7 @@
 
         public bool AktifMi { get; set; } = true;
 
+        public int? EvaluatorId { get; set; }
+
     }
 }

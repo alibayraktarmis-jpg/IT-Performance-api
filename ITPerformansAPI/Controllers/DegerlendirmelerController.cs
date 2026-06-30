@@ -59,6 +59,35 @@ namespace ITPerformansAPI.Controllers
             return Ok(degerlendirmeler);
         }
 
+        [HttpGet("calisan/{calisanId}/donem")]
+        public IActionResult GetByCalisanDonem(int calisanId, [FromQuery] string donem)
+        {
+            using var connection = new SqlConnection(_connectionString);
+            var deg = connection.QueryFirstOrDefault<Degerlendirme>(
+                "SELECT * FROM Degerlendirmeler WHERE CalisanId = @CalisanId AND Donem = @Donem",
+                new { CalisanId = calisanId, Donem = donem });
+            if (deg == null) return Ok(null);
+            var detaylar = connection.Query(
+                "SELECT * FROM DegerlendirmeDetaylar WHERE DegerlendirmeId = @Id",
+                new { Id = deg.Id }).ToList();
+            return Ok(new { degerlendirme = deg, detaylar });
+        }
+
+        [HttpPut("{id}/detaylar")]
+        public IActionResult UpdateDetaylar(int id, [FromBody] UpdateDetaylarDto dto)
+        {
+            using var connection = new SqlConnection(_connectionString);
+            connection.Execute("UPDATE Degerlendirmeler SET Yorum=@Yorum, ToplamSkor=@ToplamSkor, Tarih=@Tarih WHERE Id=@Id",
+                new { dto.Yorum, dto.ToplamSkor, Tarih = DateTime.Now, Id = id });
+            connection.Execute("DELETE FROM DegerlendirmeDetaylar WHERE DegerlendirmeId = @Id", new { Id = id });
+            foreach (var d in dto.Detaylar)
+            {
+                connection.Execute("INSERT INTO DegerlendirmeDetaylar (DegerlendirmeId, AltKriterId, Puan) VALUES (@DegerlendirmeId, @AltKriterId, @Puan)",
+                    new { DegerlendirmeId = id, d.AltKriterId, d.Puan });
+            }
+            return Ok(new { mesaj = "Degerlendirme guncellendi" });
+        }
+
         [HttpPost]
         public IActionResult CreateDegerlendirme([FromBody] Degerlendirme yeni)
         {

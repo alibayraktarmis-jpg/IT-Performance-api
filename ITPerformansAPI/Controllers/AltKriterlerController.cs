@@ -19,10 +19,11 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpGet]
-        public IActionResult GetAll()
+        public IActionResult GetAll([FromQuery] bool sadaceAktif = false)
         {
             using var connection = new SqlConnection(_connectionString);
-            var liste = connection.Query<AltKriter>("SELECT * FROM AltKriterler").ToList();
+            var sql = sadaceAktif ? "SELECT * FROM AltKriterler WHERE AktifMi = 1" : "SELECT * FROM AltKriterler";
+            var liste = connection.Query<AltKriter>(sql).ToList();
             return Ok(liste);
         }
 

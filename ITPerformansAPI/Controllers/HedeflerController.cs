@@ -63,6 +63,16 @@ namespace ITPerformansAPI.Controllers
             return Ok(new { mesaj = "Hedef eklendi", id = yeniId });
         }
 
+        [HttpPut("{id}")]
+        [Authorize(Roles = "Admin,Evaluator")]
+        public IActionResult UpdateHedef(int id, [FromBody] Hedef guncellendi)
+        {
+            using var connection = new SqlConnection(_connectionString);
+            connection.Execute("UPDATE Hedefler SET Aciklama=@Aciklama, BitisTarihi=@BitisTarihi WHERE Id=@Id",
+                new { guncellendi.Aciklama, guncellendi.BitisTarihi, Id = id });
+            return Ok(new { mesaj = "Hedef güncellendi" });
+        }
+
         [HttpPut("{id}/tamamla")]
         public IActionResult Tamamla(int id)
         {

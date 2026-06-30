@@ -19,10 +19,11 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpGet]
-        public IActionResult GetAll()
+        public IActionResult GetAll([FromQuery] bool sadaceAktif = false)
         {
             using var connection = new SqlConnection(_connectionString);
-            var liste = connection.Query<AnaBaslik>("SELECT * FROM AnaBasliklar").ToList();
+            var sql = sadaceAktif ? "SELECT * FROM AnaBasliklar WHERE AktifMi = 1" : "SELECT * FROM AnaBasliklar";
+            var liste = connection.Query<AnaBaslik>(sql).ToList();
             return Ok(liste);
         }
 
