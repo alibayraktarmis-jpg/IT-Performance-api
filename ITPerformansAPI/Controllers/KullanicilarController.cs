@@ -46,16 +46,6 @@ namespace ITPerformansAPI.Controllers
             return Ok(tumListe);
         }
 
-        [HttpGet("{id}")]
-        [Authorize]
-        public IActionResult GetKullaniciById(int id)
-        {
-            using var connection = new SqlConnection(_connectionString);
-            var kullanici = connection.QueryFirstOrDefault<Kullanici>("SELECT * FROM Kullanicilar WHERE Id = @Id", new { Id = id });
-            if (kullanici == null) return NotFound(new { mesaj = "Kullanici bulunamadi" });
-            return Ok(kullanici);
-        }
-
         [HttpPost]
         [Authorize(Roles = "Admin")]
         public IActionResult CreateKullanici([FromBody] Kullanici yeniKullanici)
@@ -113,7 +103,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpPut("{id}")]
-        [Authorize]
+        [Authorize(Roles = "Admin")]
         public IActionResult UpdateKullanici(int id, [FromBody] Kullanici guncelKullanici)
         {
             using var connection = new SqlConnection(_connectionString);

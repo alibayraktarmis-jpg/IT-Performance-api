@@ -48,9 +48,9 @@ namespace ITPerformansAPI.Controllers
         public IActionResult Create([FromBody] AltKriter yeni)
         {
             using var connection = new SqlConnection(_connectionString);
-            var sql = "INSERT INTO AltKriterler (AnaBaslikId, KriterAdi, AktifMi) VALUES (@AnaBaslikId, @KriterAdi, @AktifMi)";
-            connection.Execute(sql, yeni);
-            return Ok("Eklendi");
+            var sql = "INSERT INTO AltKriterler (AnaBaslikId, KriterAdi, AktifMi) OUTPUT INSERTED.Id VALUES (@AnaBaslikId, @KriterAdi, @AktifMi)";
+            var yeniId = connection.ExecuteScalar<int>(sql, yeni);
+            return Ok(new { mesaj = "Eklendi", id = yeniId });
         }
 
         [HttpPut("{id}")]

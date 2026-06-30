@@ -101,6 +101,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpPut("{id}")]
+        [Authorize(Roles = "Admin,Evaluator")]
         public IActionResult UpdateDegerlendirme(int id, [FromBody] Degerlendirme guncellendi)
         {
             using var connection = new SqlConnection(_connectionString);
@@ -111,6 +112,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Roles = "Admin")]
         public IActionResult DeleteDegerlendirme(int id)
         {
             using var connection = new SqlConnection(_connectionString);
