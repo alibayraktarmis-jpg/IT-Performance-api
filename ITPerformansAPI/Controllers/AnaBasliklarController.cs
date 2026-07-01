@@ -49,9 +49,13 @@ namespace ITPerformansAPI.Controllers
         public IActionResult Update(int id, [FromBody] AnaBaslik guncellendi)
         {
             using var connection = new SqlConnection(_connectionString);
-            var sql = "UPDATE AnaBasliklar SET Baslik=@Baslik, AgirlikYuzdesi=@AgirlikYuzdesi, AktifMi=@AktifMi WHERE Id=@Id";
             guncellendi.Id = id;
-            connection.Execute(sql, guncellendi);
+            connection.Execute("UPDATE AnaBasliklar SET Baslik=@Baslik, AgirlikYuzdesi=@AgirlikYuzdesi, AktifMi=@AktifMi WHERE Id=@Id", guncellendi);
+            connection.Execute(
+                guncellendi.AktifMi
+                    ? "UPDATE AltKriterler SET AktifMi=1 WHERE AnaBaslikId=@Id"
+                    : "UPDATE AltKriterler SET AktifMi=0 WHERE AnaBaslikId=@Id",
+                new { Id = id });
             return Ok("Guncellendi");
         }
 
