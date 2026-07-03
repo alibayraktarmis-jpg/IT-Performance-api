@@ -37,6 +37,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpPost]
+        [Authorize(Roles = "Admin")]
         public IActionResult Create([FromBody] AnaBaslik yeni)
         {
             using var connection = new SqlConnection(_connectionString);
@@ -46,20 +47,26 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpPut("{id}")]
+        [Authorize(Roles = "Admin")]
         public IActionResult Update(int id, [FromBody] AnaBaslik guncellendi)
         {
             using var connection = new SqlConnection(_connectionString);
             guncellendi.Id = id;
             connection.Execute("UPDATE AnaBasliklar SET Baslik=@Baslik, AgirlikYuzdesi=@AgirlikYuzdesi, AktifMi=@AktifMi WHERE Id=@Id", guncellendi);
-            connection.Execute(
-                guncellendi.AktifMi
-                    ? "UPDATE AltKriterler SET AktifMi=1 WHERE AnaBaslikId=@Id"
-                    : "UPDATE AltKriterler SET AktifMi=0 WHERE AnaBaslikId=@Id",
-                new { Id = id });
+
+            // Ana baslik pasife alinirsa, altindaki tum kriterler de anlamsiz kalmamasi icin otomatik pasife alinir.
+            // Ancak tekrar aktiflestirildiginde alt kriterler zorla aktif yapilmaz; hangi alt kriterin aktif
+            // olacagina kullanici ayrica karar verir (aksi halde daha once bilerek pasife alinmis kriterler geri gelirdi).
+            if (!guncellendi.AktifMi)
+            {
+                connection.Execute("UPDATE AltKriterler SET AktifMi=0 WHERE AnaBaslikId=@Id", new { Id = id });
+            }
+
             return Ok("Guncellendi");
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Roles = "Admin")]
         public IActionResult Delete(int id)
         {
             using var connection = new SqlConnection(_connectionString);

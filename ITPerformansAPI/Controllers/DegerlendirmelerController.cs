@@ -55,6 +55,9 @@ namespace ITPerformansAPI.Controllers
         public IActionResult GetByCalisanId(int calisanId)
         {
             using var connection = new SqlConnection(_connectionString);
+            var erisimHatasi = CalisanErisimKontrolu(connection, calisanId);
+            if (erisimHatasi != null) return erisimHatasi;
+
             var degerlendirmeler = connection.Query<Degerlendirme>("SELECT * FROM Degerlendirmeler WHERE CalisanId = @CalisanId", new { CalisanId = calisanId }).ToList();
             return Ok(degerlendirmeler);
         }
@@ -63,36 +66,107 @@ namespace ITPerformansAPI.Controllers
         public IActionResult GetByCalisanDonem(int calisanId, [FromQuery] string donem)
         {
             using var connection = new SqlConnection(_connectionString);
+            var erisimHatasi = CalisanErisimKontrolu(connection, calisanId);
+            if (erisimHatasi != null) return erisimHatasi;
+
             var deg = connection.QueryFirstOrDefault<Degerlendirme>(
-                "SELECT * FROM Degerlendirmeler WHERE CalisanId = @CalisanId AND Donem = @Donem",
+                "SELECT TOP 1 * FROM Degerlendirmeler WHERE CalisanId = @CalisanId AND Donem = @Donem ORDER BY Id DESC",
                 new { CalisanId = calisanId, Donem = donem });
             if (deg == null) return Ok(null);
-            var detaylar = connection.Query(
+            var detaylar = connection.Query<DegerlendirmeDetay>(
                 "SELECT * FROM DegerlendirmeDetaylar WHERE DegerlendirmeId = @Id",
                 new { Id = deg.Id }).ToList();
             return Ok(new { degerlendirme = deg, detaylar });
         }
 
         [HttpPut("{id}/detaylar")]
+        [Authorize(Roles = "Admin,Evaluator")]
         public IActionResult UpdateDetaylar(int id, [FromBody] UpdateDetaylarDto dto)
         {
+            if (dto.Detaylar.Any(d => d.Puan < 1 || d.Puan > 5))
+                return BadRequest(new { mesaj = "Puanlar 1 ile 5 arasinda olmalidir." });
+
             using var connection = new SqlConnection(_connectionString);
-            connection.Execute("UPDATE Degerlendirmeler SET Yorum=@Yorum, ToplamSkor=@ToplamSkor, Tarih=@Tarih WHERE Id=@Id",
-                new { dto.Yorum, dto.ToplamSkor, Tarih = DateTime.Now, Id = id });
+
             connection.Execute("DELETE FROM DegerlendirmeDetaylar WHERE DegerlendirmeId = @Id", new { Id = id });
             foreach (var d in dto.Detaylar)
             {
                 connection.Execute("INSERT INTO DegerlendirmeDetaylar (DegerlendirmeId, AltKriterId, Puan) VALUES (@DegerlendirmeId, @AltKriterId, @Puan)",
                     new { DegerlendirmeId = id, d.AltKriterId, d.Puan });
             }
-            return Ok(new { mesaj = "Degerlendirme guncellendi" });
+
+            // Toplam skor istemciden gelen degerle degil, kaydedilen detaylardan sunucuda yeniden hesaplanir
+            var hesaplananSkor = SkorHesapla(connection, id);
+            connection.Execute("UPDATE Degerlendirmeler SET Yorum=@Yorum, ToplamSkor=@ToplamSkor, Tarih=@Tarih WHERE Id=@Id",
+                new { dto.Yorum, ToplamSkor = hesaplananSkor, Tarih = DateTime.Now, Id = id });
+
+            return Ok(new { mesaj = "Degerlendirme guncellendi", toplamSkor = hesaplananSkor });
+        }
+
+        // Employee sadece kendi verisine, Evaluator sadece kendi ekibindeki calisanlara, Admin ise herkese erisebilir
+        private IActionResult? CalisanErisimKontrolu(SqlConnection connection, int calisanId)
+        {
+            var rol = User.FindFirst(ClaimTypes.Role)?.Value;
+            if (rol == "Admin") return null;
+
+            var kullaniciId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
+
+            if (rol == "Employee")
+                return calisanId == kullaniciId ? null : Forbid();
+
+            if (rol == "Evaluator")
+            {
+                var gecerliMi = connection.QueryFirstOrDefault<int?>(
+                    "SELECT Id FROM Kullanicilar WHERE Id = @CalisanId AND EvaluatorId = @EvaluatorId",
+                    new { CalisanId = calisanId, EvaluatorId = kullaniciId });
+                return gecerliMi != null ? null : Forbid();
+            }
+
+            return Forbid();
+        }
+
+        private double SkorHesapla(SqlConnection connection, int degerlendirmeId)
+        {
+            var sql = @"
+                SELECT
+                    ab.AgirlikYuzdesi,
+                    AVG(CAST(dd.Puan AS FLOAT)) AS OrtalamaPuan
+                FROM DegerlendirmeDetaylar dd
+                INNER JOIN AltKriterler ak ON dd.AltKriterId = ak.Id
+                INNER JOIN AnaBasliklar ab ON ak.AnaBaslikId = ab.Id
+                WHERE dd.DegerlendirmeId = @DegerlendirmeId
+                GROUP BY ab.AgirlikYuzdesi";
+
+            var kategoriler = connection.Query(sql, new { DegerlendirmeId = degerlendirmeId }).ToList();
+
+            double toplam = 0;
+            foreach (var kategori in kategoriler)
+            {
+                toplam += (kategori.AgirlikYuzdesi / 100.0) * (kategori.OrtalamaPuan / 5.0) * 100.0;
+            }
+            return Math.Round(toplam, 2);
         }
 
         [HttpPost]
+        [Authorize(Roles = "Admin,Evaluator")]
         public IActionResult CreateDegerlendirme([FromBody] Degerlendirme yeni)
         {
             using var connection = new SqlConnection(_connectionString);
-            var sql = @"INSERT INTO Degerlendirmeler 
+
+            var erisimHatasi = CalisanErisimKontrolu(connection, yeni.CalisanId);
+            if (erisimHatasi != null) return erisimHatasi;
+
+            var rol = User.FindFirst(ClaimTypes.Role)?.Value;
+            if (rol == "Evaluator")
+                yeni.DegerlendiricId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
+
+            var mevcutMu = connection.QueryFirstOrDefault<int?>(
+                "SELECT Id FROM Degerlendirmeler WHERE CalisanId = @CalisanId AND Donem = @Donem",
+                new { yeni.CalisanId, yeni.Donem });
+            if (mevcutMu != null)
+                return Conflict(new { mesaj = "Bu calisan icin bu doneme ait bir degerlendirme zaten mevcut.", id = mevcutMu });
+
+            var sql = @"INSERT INTO Degerlendirmeler
                 (DegerlendiricId, CalisanId, Tarih, Donem, Yorum, ToplamSkor) 
                 OUTPUT INSERTED.Id
                 VALUES (@DegerlendiricId, @CalisanId, @Tarih, @Donem, @Yorum, @ToplamSkor)";
@@ -105,10 +179,33 @@ namespace ITPerformansAPI.Controllers
         public IActionResult UpdateDegerlendirme(int id, [FromBody] Degerlendirme guncellendi)
         {
             using var connection = new SqlConnection(_connectionString);
-            guncellendi.Id = id;
+
+            var mevcut = connection.QueryFirstOrDefault<Degerlendirme>("SELECT * FROM Degerlendirmeler WHERE Id = @Id", new { Id = id });
+            if (mevcut == null) return NotFound(new { mesaj = "Degerlendirme bulunamadi" });
+
+            var erisimHatasi = CalisanErisimKontrolu(connection, mevcut.CalisanId);
+            if (erisimHatasi != null) return erisimHatasi;
+
+            if (guncellendi.CalisanId != mevcut.CalisanId)
+            {
+                var yeniCalisanErisimHatasi = CalisanErisimKontrolu(connection, guncellendi.CalisanId);
+                if (yeniCalisanErisimHatasi != null) return yeniCalisanErisimHatasi;
+            }
+
+            // Toplam skor burada da client'tan degil, kayitli detaylardan sunucuda hesaplanir
+            var hesaplananSkor = SkorHesapla(connection, id);
             var sql = "UPDATE Degerlendirmeler SET DegerlendiricId=@DegerlendiricId, CalisanId=@CalisanId, Tarih=@Tarih, Donem=@Donem, Yorum=@Yorum, ToplamSkor=@ToplamSkor WHERE Id=@Id";
-            connection.Execute(sql, guncellendi);
-            return Ok(new { mesaj = "Degerlendirme guncellendi" });
+            connection.Execute(sql, new
+            {
+                guncellendi.DegerlendiricId,
+                guncellendi.CalisanId,
+                guncellendi.Tarih,
+                guncellendi.Donem,
+                guncellendi.Yorum,
+                ToplamSkor = hesaplananSkor,
+                Id = id
+            });
+            return Ok(new { mesaj = "Degerlendirme guncellendi", toplamSkor = hesaplananSkor });
         }
 
         [HttpDelete("{id}")]
@@ -132,12 +229,14 @@ namespace ITPerformansAPI.Controllers
         public IActionResult ToplamSkorHesapla(int calisanId, [FromQuery] string? donem = null)
         {
             using var connection = new SqlConnection(_connectionString);
+            var erisimHatasi = CalisanErisimKontrolu(connection, calisanId);
+            if (erisimHatasi != null) return erisimHatasi;
 
             var sql = @"
                 SELECT
-                    ab.Baslik,
-                    ab.AgirlikYuzdesi,
-                    AVG(CAST(dd.Puan AS FLOAT)) AS OrtalmaPuan
+                    ab.Baslik AS baslik,
+                    ab.AgirlikYuzdesi AS agirlikYuzdesi,
+                    AVG(CAST(dd.Puan AS FLOAT)) AS ortalamaPuan
                 FROM DegerlendirmeDetaylar dd
                 INNER JOIN AltKriterler ak ON dd.AltKriterId = ak.Id
                 INNER JOIN AnaBasliklar ab ON ak.AnaBaslikId = ab.Id
@@ -151,7 +250,7 @@ namespace ITPerformansAPI.Controllers
             double toplamSkor = 0;
             foreach (var kategori in kategoriSkorlar)
             {
-                double kategorSkor = (kategori.AgirlikYuzdesi / 100.0) * (kategori.OrtalmaPuan / 5.0) * 100.0;
+                double kategorSkor = (kategori.agirlikYuzdesi / 100.0) * (kategori.ortalamaPuan / 5.0) * 100.0;
                 toplamSkor += kategorSkor;
             }
 
@@ -177,34 +276,34 @@ namespace ITPerformansAPI.Controllers
             if (rol == "Admin")
             {
                 sql = $@"
-                    SELECT k.Id, k.Ad, k.Soyad, k.Departman, k.Rol,
-                           AVG(d.ToplamSkor) AS OrtalamaToplamSkor
+                    SELECT k.Id AS id, k.Ad AS ad, k.Soyad AS soyad, k.Departman AS departman, k.Rol AS rol,
+                           AVG(d.ToplamSkor) AS ortalamaToplamSkor
                     FROM Kullanicilar k
                     LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId {donemFilter}
                     GROUP BY k.Id, k.Ad, k.Soyad, k.Departman, k.Rol
-                    ORDER BY OrtalamaToplamSkor DESC";
+                    ORDER BY ortalamaToplamSkor DESC";
             }
             else if (rol == "Evaluator")
             {
                 sql = $@"
-                    SELECT k.Id, k.Ad, k.Soyad, k.Departman, k.Rol,
-                           AVG(d.ToplamSkor) AS OrtalamaToplamSkor
+                    SELECT k.Id AS id, k.Ad AS ad, k.Soyad AS soyad, k.Departman AS departman, k.Rol AS rol,
+                           AVG(d.ToplamSkor) AS ortalamaToplamSkor
                     FROM Kullanicilar k
                     LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId {donemFilter}
                     WHERE k.Rol = 'Employee' AND k.EvaluatorId = @KullaniciId
                     GROUP BY k.Id, k.Ad, k.Soyad, k.Departman, k.Rol
-                    ORDER BY OrtalamaToplamSkor DESC";
+                    ORDER BY ortalamaToplamSkor DESC";
             }
             else
             {
                 sql = $@"
-                    SELECT k.Id, k.Ad, k.Soyad, k.Departman, k.Rol,
-                           AVG(d.ToplamSkor) AS OrtalamaToplamSkor
+                    SELECT k.Id AS id, k.Ad AS ad, k.Soyad AS soyad, k.Departman AS departman, k.Rol AS rol,
+                           AVG(d.ToplamSkor) AS ortalamaToplamSkor
                     FROM Kullanicilar k
                     LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId {donemFilter}
                     WHERE k.Id = @KullaniciId
                     GROUP BY k.Id, k.Ad, k.Soyad, k.Departman, k.Rol
-                    ORDER BY OrtalamaToplamSkor DESC";
+                    ORDER BY ortalamaToplamSkor DESC";
             }
 
             var sonuc = connection.Query(sql, new { KullaniciId = kullaniciId, Donem = donem }).ToList();
@@ -212,6 +311,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpGet("excel")]
+        [Authorize(Roles = "Admin")]
         public IActionResult ExcelExport()
         {
             using var connection = new SqlConnection(_connectionString);

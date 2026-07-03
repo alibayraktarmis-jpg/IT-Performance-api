@@ -102,6 +102,20 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseCors("AllowAll");
+
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (Microsoft.Data.SqlClient.SqlException sqlEx) when (sqlEx.Number == 547)
+    {
+        context.Response.StatusCode = StatusCodes.Status409Conflict;
+        await context.Response.WriteAsJsonAsync(new { mesaj = "Bu kayit, iliskili baska kayitlar oldugu icin silinemedi veya guncellenemedi." });
+    }
+});
+
 app.UseAuthentication();
 app.UseAuthorization();
 

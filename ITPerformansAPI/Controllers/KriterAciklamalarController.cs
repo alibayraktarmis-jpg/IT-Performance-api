@@ -55,6 +55,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpPost]
+        [Authorize(Roles = "Admin")]
         public IActionResult Create([FromBody] KriterAciklama yeni)
         {
             using var connection = new SqlConnection(_connectionString);
@@ -64,6 +65,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpPut("{id}")]
+        [Authorize(Roles = "Admin")]
         public IActionResult Update(int id, [FromBody] KriterAciklama guncellendi)
         {
             using var connection = new SqlConnection(_connectionString);
@@ -74,6 +76,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpPost("kriter/{altKriterId}/upsert")]
+        [Authorize(Roles = "Admin")]
         public IActionResult Upsert(int altKriterId, [FromBody] List<KriterAciklama> aciklamalar)
         {
             using var connection = new SqlConnection(_connectionString);
@@ -100,6 +103,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Roles = "Admin")]
         public IActionResult Delete(int id)
         {
             using var connection = new SqlConnection(_connectionString);

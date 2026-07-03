@@ -45,6 +45,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpPost]
+        [Authorize(Roles = "Admin")]
         public IActionResult Create([FromBody] AltKriter yeni)
         {
             using var connection = new SqlConnection(_connectionString);
@@ -54,6 +55,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpPut("{id}")]
+        [Authorize(Roles = "Admin")]
         public IActionResult Update(int id, [FromBody] AltKriter guncellendi)
         {
             using var connection = new SqlConnection(_connectionString);
@@ -64,6 +66,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Roles = "Admin")]
         public IActionResult Delete(int id)
         {
             using var connection = new SqlConnection(_connectionString);

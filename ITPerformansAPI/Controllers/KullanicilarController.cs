@@ -40,6 +40,14 @@ namespace ITPerformansAPI.Controllers
                 return Ok(liste);
             }
 
+            if (rol == "Employee")
+            {
+                var kendisi = connection.Query<Kullanici>(
+                    "SELECT Id, Ad, Soyad, Email, Rol, Departman, AktifMi FROM Kullanicilar WHERE Id = @Id",
+                    new { Id = kullaniciId }).ToList();
+                return Ok(kendisi);
+            }
+
             var tumListe = connection.Query<Kullanici>(
                 "SELECT Id, Ad, Soyad, Email, Rol, Departman, AktifMi, EvaluatorId FROM Kullanicilar"
             ).ToList();
@@ -87,7 +95,7 @@ namespace ITPerformansAPI.Controllers
                 issuer: _configuration["Jwt:Issuer"],
                 audience: _configuration["Jwt:Audience"],
                 claims: claims,
-                expires: DateTime.Now.AddHours(8),
+                expires: DateTime.UtcNow.AddHours(8),
                 signingCredentials: creds
             );
 
@@ -104,12 +112,20 @@ namespace ITPerformansAPI.Controllers
 
         [HttpPut("{id}")]
         [Authorize(Roles = "Admin")]
-        public IActionResult UpdateKullanici(int id, [FromBody] Kullanici guncelKullanici)
+        public IActionResult UpdateKullanici(int id, [FromBody] UpdateKullaniciDto guncelKullanici)
         {
             using var connection = new SqlConnection(_connectionString);
-            guncelKullanici.Id = id;
             var sql = "UPDATE Kullanicilar SET Ad=@Ad, Soyad=@Soyad, Email=@Email, Rol=@Rol, Departman=@Departman, EvaluatorId=@EvaluatorId WHERE Id=@Id";
-            var etkilenenSatir = connection.Execute(sql, guncelKullanici);
+            var etkilenenSatir = connection.Execute(sql, new
+            {
+                guncelKullanici.Ad,
+                guncelKullanici.Soyad,
+                guncelKullanici.Email,
+                guncelKullanici.Rol,
+                guncelKullanici.Departman,
+                guncelKullanici.EvaluatorId,
+                Id = id
+            });
             if (etkilenenSatir == 0) return NotFound(new { mesaj = "Guncellenecek kullanici bulunamadi" });
             return Ok(new { mesaj = "Kullanici basariyla guncellendi" });
         }
@@ -124,7 +140,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpPatch("{id}/aktif")]
-        [Authorize]
+        [Authorize(Roles = "Admin")]
         public IActionResult AktifPasifYap(int id, [FromBody] bool aktifMi)
         {
             using var connection = new SqlConnection(_connectionString);
