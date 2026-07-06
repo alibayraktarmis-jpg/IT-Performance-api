@@ -1,0 +1,24 @@
+using System.Security.Claims;
+using Dapper;
+using Microsoft.Data.SqlClient;
+
+namespace ITPerformansAPI.Helpers
+{
+    public static class ErisimKontrol
+    {
+        // Admin her zaman erisebilir. Evaluator ise sadece kendi ekibindeki
+        // (EvaluatorId'si kendisiyle eslesen) calisanlara erisebilir.
+        public static bool EvaluatorKendiEkibindeMi(SqlConnection connection, ClaimsPrincipal user, int calisanId)
+        {
+            var rol = user.FindFirst(ClaimTypes.Role)?.Value;
+            if (rol == "Admin") return true;
+            if (rol != "Evaluator") return false;
+
+            var kullaniciId = int.Parse(user.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
+            var gecerliMi = connection.QueryFirstOrDefault<int?>(
+                "SELECT Id FROM Kullanicilar WHERE Id = @CalisanId AND EvaluatorId = @EvaluatorId",
+                new { CalisanId = calisanId, EvaluatorId = kullaniciId });
+            return gecerliMi != null;
+        }
+    }
+}

@@ -36,11 +36,34 @@ namespace ITPerformansAPI.Controllers
             return Ok(baslik);
         }
 
+        // Aktif ana basliklarin agirlik toplami %100'u gecemez. id parametresi Update sirasinda
+        // guncellenen kaydin kendisini toplamdan haric tutmak icin kullanilir (Create'de null).
+        private IActionResult? AgirlikToplamiKontrolu(SqlConnection connection, int agirlikYuzdesi, bool aktifMi, int? id)
+        {
+            if (!aktifMi) return null;
+
+            var sql = "SELECT ISNULL(SUM(AgirlikYuzdesi), 0) FROM AnaBasliklar WHERE AktifMi = 1" + (id != null ? " AND Id != @Id" : "");
+            var digerAktifToplam = connection.ExecuteScalar<int>(sql, new { Id = id });
+
+            if (digerAktifToplam + agirlikYuzdesi > 100)
+            {
+                return new BadRequestObjectResult(new
+                {
+                    mesaj = $"Aktif ana kriterlerin toplam ağırlığı %100'ü geçemez. Diğer aktif kriterlerin toplamı: %{digerAktifToplam}, bu kriter için kalan pay: %{100 - digerAktifToplam}."
+                });
+            }
+            return null;
+        }
+
         [HttpPost]
         [Authorize(Roles = "Admin")]
         public IActionResult Create([FromBody] AnaBaslik yeni)
         {
             using var connection = new SqlConnection(_connectionString);
+
+            var agirlikHatasi = AgirlikToplamiKontrolu(connection, yeni.AgirlikYuzdesi, yeni.AktifMi, null);
+            if (agirlikHatasi != null) return agirlikHatasi;
+
             var sql = "INSERT INTO AnaBasliklar (Baslik, AgirlikYuzdesi, AktifMi) VALUES (@Baslik, @AgirlikYuzdesi, @AktifMi)";
             connection.Execute(sql, yeni);
             return Ok("Eklendi");
@@ -52,6 +75,10 @@ namespace ITPerformansAPI.Controllers
         {
             using var connection = new SqlConnection(_connectionString);
             guncellendi.Id = id;
+
+            var agirlikHatasi = AgirlikToplamiKontrolu(connection, guncellendi.AgirlikYuzdesi, guncellendi.AktifMi, id);
+            if (agirlikHatasi != null) return agirlikHatasi;
+
             connection.Execute("UPDATE AnaBasliklar SET Baslik=@Baslik, AgirlikYuzdesi=@AgirlikYuzdesi, AktifMi=@AktifMi WHERE Id=@Id", guncellendi);
 
             // Ana baslik pasife alinirsa, altindaki tum kriterler de anlamsiz kalmamasi icin otomatik pasife alinir.
@@ -70,6 +97,17 @@ namespace ITPerformansAPI.Controllers
         public IActionResult Delete(int id)
         {
             using var connection = new SqlConnection(_connectionString);
+
+            var altKriterSayisi = connection.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM AltKriterler WHERE AnaBaslikId = @Id", new { Id = id });
+            if (altKriterSayisi > 0)
+            {
+                return BadRequest(new
+                {
+                    mesaj = "Bu ana kriterin altında hâlâ alt kriterler var. Önce onları silin veya başka bir ana kritere taşıyın."
+                });
+            }
+
             connection.Execute("DELETE FROM AnaBasliklar WHERE Id=@Id", new { Id = id });
             return Ok("Silindi");
         }

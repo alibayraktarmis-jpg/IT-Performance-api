@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Dapper;
 using ITPerformansAPI.Models;
+using ITPerformansAPI.Helpers;
 using System.Security.Claims;
 
 namespace ITPerformansAPI.Controllers
@@ -27,7 +28,7 @@ namespace ITPerformansAPI.Controllers
 
             using var connection = new SqlConnection(_connectionString);
 
-            if (rol == "Admin" || rol == "Evaluator")
+            if (rol == "Admin")
             {
                 var liste = connection.Query(@"
                     SELECT h.Id AS id, h.CalisanId AS calisanId, h.Aciklama AS aciklama, h.BitisTarihi AS bitisTarihi, h.TamamlandiMi AS tamamlandiMi,
@@ -35,6 +36,19 @@ namespace ITPerformansAPI.Controllers
                     FROM Hedefler h
                     INNER JOIN Kullanicilar k ON h.CalisanId = k.Id
                     ORDER BY h.TamamlandiMi ASC, h.BitisTarihi ASC").ToList();
+                return Ok(liste);
+            }
+            else if (rol == "Evaluator")
+            {
+                // Evaluator sadece kendisine atanmis (EvaluatorId eslesen) calisanlarin hedeflerini gorebilir
+                var liste = connection.Query(@"
+                    SELECT h.Id AS id, h.CalisanId AS calisanId, h.Aciklama AS aciklama, h.BitisTarihi AS bitisTarihi, h.TamamlandiMi AS tamamlandiMi,
+                           k.Ad AS ad, k.Soyad AS soyad, k.Departman AS departman
+                    FROM Hedefler h
+                    INNER JOIN Kullanicilar k ON h.CalisanId = k.Id
+                    WHERE k.EvaluatorId = @KullaniciId
+                    ORDER BY h.TamamlandiMi ASC, h.BitisTarihi ASC",
+                    new { KullaniciId = kullaniciId }).ToList();
                 return Ok(liste);
             }
             else
@@ -99,16 +113,7 @@ namespace ITPerformansAPI.Controllers
 
         // Admin her calisana/hedefe, Evaluator sadece kendi ekibindeki calisanlara/hedeflere erisebilir
         private bool CalisanErisimVarMi(SqlConnection connection, int calisanId)
-        {
-            var rol = User.FindFirst(ClaimTypes.Role)?.Value;
-            if (rol == "Admin") return true;
-
-            var kullaniciId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
-            var gecerliMi = connection.QueryFirstOrDefault<int?>(
-                "SELECT Id FROM Kullanicilar WHERE Id = @CalisanId AND EvaluatorId = @EvaluatorId",
-                new { CalisanId = calisanId, EvaluatorId = kullaniciId });
-            return gecerliMi != null;
-        }
+            => ErisimKontrol.EvaluatorKendiEkibindeMi(connection, User, calisanId);
 
         private bool HedefeErisimVarMi(SqlConnection connection, int hedefId)
         {

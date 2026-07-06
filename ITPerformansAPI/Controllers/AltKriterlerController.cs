@@ -70,6 +70,17 @@ namespace ITPerformansAPI.Controllers
         public IActionResult Delete(int id)
         {
             using var connection = new SqlConnection(_connectionString);
+
+            var kullanilmisMi = connection.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM DegerlendirmeDetaylar WHERE AltKriterId = @Id", new { Id = id });
+            if (kullanilmisMi > 0)
+            {
+                return BadRequest(new
+                {
+                    mesaj = "Bu alt kriter geçmiş değerlendirmelerde kullanılmış, silinemez. Bunun yerine pasife alabilirsiniz."
+                });
+            }
+
             connection.Execute("DELETE FROM AltKriterler WHERE Id=@Id", new { Id = id });
             return Ok("Silindi");
         }

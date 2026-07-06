@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Dapper;
 using ITPerformansAPI.Models;
+using ITPerformansAPI.Helpers;
 using System.Security.Claims;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
@@ -96,7 +97,7 @@ namespace ITPerformansAPI.Controllers
             }
 
             // Toplam skor istemciden gelen degerle degil, kaydedilen detaylardan sunucuda yeniden hesaplanir
-            var hesaplananSkor = SkorHesapla(connection, id);
+            var hesaplananSkor = SkorHesaplayici.Hesapla(connection, id);
             connection.Execute("UPDATE Degerlendirmeler SET Yorum=@Yorum, ToplamSkor=@ToplamSkor, Tarih=@Tarih WHERE Id=@Id",
                 new { dto.Yorum, ToplamSkor = hesaplananSkor, Tarih = DateTime.Now, Id = id });
 
@@ -109,42 +110,16 @@ namespace ITPerformansAPI.Controllers
             var rol = User.FindFirst(ClaimTypes.Role)?.Value;
             if (rol == "Admin") return null;
 
-            var kullaniciId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
-
             if (rol == "Employee")
+            {
+                var kullaniciId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
                 return calisanId == kullaniciId ? null : Forbid();
+            }
 
             if (rol == "Evaluator")
-            {
-                var gecerliMi = connection.QueryFirstOrDefault<int?>(
-                    "SELECT Id FROM Kullanicilar WHERE Id = @CalisanId AND EvaluatorId = @EvaluatorId",
-                    new { CalisanId = calisanId, EvaluatorId = kullaniciId });
-                return gecerliMi != null ? null : Forbid();
-            }
+                return ErisimKontrol.EvaluatorKendiEkibindeMi(connection, User, calisanId) ? null : Forbid();
 
             return Forbid();
-        }
-
-        private double SkorHesapla(SqlConnection connection, int degerlendirmeId)
-        {
-            var sql = @"
-                SELECT
-                    ab.AgirlikYuzdesi,
-                    AVG(CAST(dd.Puan AS FLOAT)) AS OrtalamaPuan
-                FROM DegerlendirmeDetaylar dd
-                INNER JOIN AltKriterler ak ON dd.AltKriterId = ak.Id
-                INNER JOIN AnaBasliklar ab ON ak.AnaBaslikId = ab.Id
-                WHERE dd.DegerlendirmeId = @DegerlendirmeId
-                GROUP BY ab.AgirlikYuzdesi";
-
-            var kategoriler = connection.Query(sql, new { DegerlendirmeId = degerlendirmeId }).ToList();
-
-            double toplam = 0;
-            foreach (var kategori in kategoriler)
-            {
-                toplam += (kategori.AgirlikYuzdesi / 100.0) * (kategori.OrtalamaPuan / 5.0) * 100.0;
-            }
-            return Math.Round(toplam, 2);
         }
 
         [HttpPost]
@@ -166,10 +141,13 @@ namespace ITPerformansAPI.Controllers
             if (mevcutMu != null)
                 return Conflict(new { mesaj = "Bu calisan icin bu doneme ait bir degerlendirme zaten mevcut.", id = mevcutMu });
 
+            // Toplam skor istemciden gelen degerle degil, kayitli detaylardan hesaplanir;
+            // olusturma anda henuz detay girilmedigi icin baslangicta 0 kaydedilir ve
+            // her DegerlendirmeDetaylar eklendikce sunucuda yeniden hesaplanip guncellenir.
             var sql = @"INSERT INTO Degerlendirmeler
-                (DegerlendiricId, CalisanId, Tarih, Donem, Yorum, ToplamSkor) 
+                (DegerlendiricId, CalisanId, Tarih, Donem, Yorum, ToplamSkor)
                 OUTPUT INSERTED.Id
-                VALUES (@DegerlendiricId, @CalisanId, @Tarih, @Donem, @Yorum, @ToplamSkor)";
+                VALUES (@DegerlendiricId, @CalisanId, @Tarih, @Donem, @Yorum, 0)";
             var yeniId = connection.ExecuteScalar<int>(sql, yeni);
             return Ok(new { mesaj = "Degerlendirme eklendi", id = yeniId });
         }
@@ -193,7 +171,7 @@ namespace ITPerformansAPI.Controllers
             }
 
             // Toplam skor burada da client'tan degil, kayitli detaylardan sunucuda hesaplanir
-            var hesaplananSkor = SkorHesapla(connection, id);
+            var hesaplananSkor = SkorHesaplayici.Hesapla(connection, id);
             var sql = "UPDATE Degerlendirmeler SET DegerlendiricId=@DegerlendiricId, CalisanId=@CalisanId, Tarih=@Tarih, Donem=@Donem, Yorum=@Yorum, ToplamSkor=@ToplamSkor WHERE Id=@Id";
             connection.Execute(sql, new
             {
@@ -320,7 +298,7 @@ namespace ITPerformansAPI.Controllers
                        AVG(d.ToplamSkor) AS OrtalamaToplamSkor
                 FROM Kullanicilar k
                 LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId
-                GROUP BY k.Ad, k.Soyad, k.Departman, k.Rol
+                GROUP BY k.Id, k.Ad, k.Soyad, k.Departman, k.Rol
                 ORDER BY OrtalamaToplamSkor DESC";
 
             var veriler = connection.Query(sql).ToList();
@@ -362,7 +340,7 @@ namespace ITPerformansAPI.Controllers
                        AVG(d.ToplamSkor) AS OrtalamaToplamSkor
                 FROM Kullanicilar k
                 LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId
-                GROUP BY k.Ad, k.Soyad, k.Departman, k.Rol
+                GROUP BY k.Id, k.Ad, k.Soyad, k.Departman, k.Rol
                 ORDER BY OrtalamaToplamSkor DESC";
 
             var veriler = connection.Query(sql).ToList();
