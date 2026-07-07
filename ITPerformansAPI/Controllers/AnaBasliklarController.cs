@@ -40,6 +40,9 @@ namespace ITPerformansAPI.Controllers
         // guncellenen kaydin kendisini toplamdan haric tutmak icin kullanilir (Create'de null).
         private IActionResult? AgirlikToplamiKontrolu(SqlConnection connection, int agirlikYuzdesi, bool aktifMi, int? id)
         {
+            if (agirlikYuzdesi < 0 || agirlikYuzdesi > 100)
+                return new BadRequestObjectResult(new { mesaj = "Ağırlık yüzdesi 0 ile 100 arasında olmalıdır." });
+
             if (!aktifMi) return null;
 
             var sql = "SELECT ISNULL(SUM(AgirlikYuzdesi), 0) FROM AnaBasliklar WHERE AktifMi = 1" + (id != null ? " AND Id != @Id" : "");
@@ -49,7 +52,7 @@ namespace ITPerformansAPI.Controllers
             {
                 return new BadRequestObjectResult(new
                 {
-                    mesaj = $"Aktif ana kriterlerin toplam ağırlığı %100'ü geçemez. Diğer aktif kriterlerin toplamı: %{digerAktifToplam}, bu kriter için kalan pay: %{100 - digerAktifToplam}."
+                    mesaj = "Aktif ana kriterlerin toplam ağırlığı %100'ü geçemez."
                 });
             }
             return null;
@@ -81,13 +84,8 @@ namespace ITPerformansAPI.Controllers
 
             connection.Execute("UPDATE AnaBasliklar SET Baslik=@Baslik, AgirlikYuzdesi=@AgirlikYuzdesi, AktifMi=@AktifMi WHERE Id=@Id", guncellendi);
 
-            // Ana baslik pasife alinirsa, altindaki tum kriterler de anlamsiz kalmamasi icin otomatik pasife alinir.
-            // Ancak tekrar aktiflestirildiginde alt kriterler zorla aktif yapilmaz; hangi alt kriterin aktif
-            // olacagina kullanici ayrica karar verir (aksi halde daha once bilerek pasife alinmis kriterler geri gelirdi).
-            if (!guncellendi.AktifMi)
-            {
-                connection.Execute("UPDATE AltKriterler SET AktifMi=0 WHERE AnaBaslikId=@Id", new { Id = id });
-            }
+            // Ana baslik pasife/aktif alindiginda, altindaki tum alt kriterler de ayni duruma getirilir.
+            connection.Execute("UPDATE AltKriterler SET AktifMi=@AktifMi WHERE AnaBaslikId=@Id", new { guncellendi.AktifMi, Id = id });
 
             return Ok("Guncellendi");
         }

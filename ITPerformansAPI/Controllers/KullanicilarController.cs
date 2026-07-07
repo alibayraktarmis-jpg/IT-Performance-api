@@ -59,10 +59,31 @@ namespace ITPerformansAPI.Controllers
         public IActionResult CreateKullanici([FromBody] Kullanici yeniKullanici)
         {
             using var connection = new SqlConnection(_connectionString);
+
+            var tutarsizlikHatasi = DepartmanEvaluatorTutarliMi(connection, yeniKullanici.Rol, yeniKullanici.Departman, yeniKullanici.EvaluatorId);
+            if (tutarsizlikHatasi != null) return tutarsizlikHatasi;
+
             yeniKullanici.Sifre = BCrypt.Net.BCrypt.HashPassword(yeniKullanici.Sifre);
             var sql = "INSERT INTO Kullanicilar (Ad, Soyad, Email, Sifre, Rol, Departman, EvaluatorId) VALUES (@Ad, @Soyad, @Email, @Sifre, @Rol, @Departman, @EvaluatorId)";
             connection.Execute(sql, yeniKullanici);
             return Ok(new { mesaj = "Kullanici basariyla eklendi" });
+        }
+
+        private IActionResult? DepartmanEvaluatorTutarliMi(SqlConnection connection, string rol, string departman, int? evaluatorId)
+        {
+            if (rol != "Employee" || evaluatorId == null) return null;
+
+            var evaluatorDepartman = connection.QueryFirstOrDefault<string>(
+                "SELECT Departman FROM Kullanicilar WHERE Id = @Id AND Rol = 'Evaluator'",
+                new { Id = evaluatorId });
+
+            if (evaluatorDepartman == null)
+                return BadRequest(new { mesaj = "Seçilen değerlendirici bulunamadı veya Evaluator rolünde değil." });
+
+            if (evaluatorDepartman != departman)
+                return BadRequest(new { mesaj = $"Değerlendiricinin departmanı ({evaluatorDepartman}) çalışanın departmanıyla ({departman}) uyuşmuyor." });
+
+            return null;
         }
 
         [HttpPost("login")]
@@ -114,7 +135,15 @@ namespace ITPerformansAPI.Controllers
         [Authorize(Roles = "Admin")]
         public IActionResult UpdateKullanici(int id, [FromBody] UpdateKullaniciDto guncelKullanici)
         {
+            var kullaniciId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
+            if (id == kullaniciId)
+                return BadRequest(new { mesaj = "Kendi hesabınızı düzenleyemezsiniz." });
+
             using var connection = new SqlConnection(_connectionString);
+
+            var tutarsizlikHatasi = DepartmanEvaluatorTutarliMi(connection, guncelKullanici.Rol, guncelKullanici.Departman, guncelKullanici.EvaluatorId);
+            if (tutarsizlikHatasi != null) return tutarsizlikHatasi;
+
             var sql = "UPDATE Kullanicilar SET Ad=@Ad, Soyad=@Soyad, Email=@Email, Rol=@Rol, Departman=@Departman, EvaluatorId=@EvaluatorId WHERE Id=@Id";
             var etkilenenSatir = connection.Execute(sql, new
             {
@@ -134,7 +163,17 @@ namespace ITPerformansAPI.Controllers
         [Authorize(Roles = "Admin")]
         public IActionResult DeleteKullanici(int id)
         {
+            var kullaniciId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
+            if (id == kullaniciId)
+                return BadRequest(new { mesaj = "Kendi hesabınızı silemezsiniz." });
+
             using var connection = new SqlConnection(_connectionString);
+
+            var bagliCalisanSayisi = connection.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM Kullanicilar WHERE EvaluatorId = @Id", new { Id = id });
+            if (bagliCalisanSayisi > 0)
+                return BadRequest(new { mesaj = "Bu değerlendiriciye hâlâ bağlı çalışanlar var. Önce onları başka bir değerlendiriciye atayın." });
+
             connection.Execute("DELETE FROM Kullanicilar WHERE Id=@Id", new { Id = id });
             return Ok(new { mesaj = "Kullanici silindi" });
         }
@@ -143,6 +182,10 @@ namespace ITPerformansAPI.Controllers
         [Authorize(Roles = "Admin")]
         public IActionResult AktifPasifYap(int id, [FromBody] bool aktifMi)
         {
+            var kullaniciId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
+            if (id == kullaniciId)
+                return BadRequest(new { mesaj = "Kendi hesabınızı pasife alamazsınız." });
+
             using var connection = new SqlConnection(_connectionString);
             var sql = "UPDATE Kullanicilar SET AktifMi = @AktifMi WHERE Id = @Id";
             connection.Execute(sql, new { AktifMi = aktifMi, Id = id });
