@@ -1,8 +1,9 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Dapper;
 using ITPerformansAPI.Models;
+using System.Data;
 
 namespace ITPerformansAPI.Controllers
 {
@@ -22,8 +23,9 @@ namespace ITPerformansAPI.Controllers
         public IActionResult GetAll([FromQuery] bool sadaceAktif = false)
         {
             using var connection = new SqlConnection(_connectionString);
-            var sql = sadaceAktif ? "SELECT * FROM AnaBasliklar WHERE AktifMi = 1" : "SELECT * FROM AnaBasliklar";
-            var liste = connection.Query<AnaBaslik>(sql).ToList();
+            var liste = connection.Query<AnaBaslik>(
+                "usp_AnaBasliklar_GetAll", new { SadeceAktif = sadaceAktif },
+                commandType: CommandType.StoredProcedure).ToList();
             return Ok(liste);
         }
 
@@ -31,31 +33,11 @@ namespace ITPerformansAPI.Controllers
         public IActionResult GetById(int id)
         {
             using var connection = new SqlConnection(_connectionString);
-            var baslik = connection.QueryFirstOrDefault<AnaBaslik>("SELECT * FROM AnaBasliklar WHERE Id = @Id", new { Id = id });
+            var baslik = connection.QueryFirstOrDefault<AnaBaslik>(
+                "usp_AnaBasliklar_GetById", new { Id = id },
+                commandType: CommandType.StoredProcedure);
             if (baslik == null) return NotFound();
             return Ok(baslik);
-        }
-
-        // Aktif ana basliklarin agirlik toplami %100'u gecemez. id parametresi Update sirasinda
-        // guncellenen kaydin kendisini toplamdan haric tutmak icin kullanilir (Create'de null).
-        private IActionResult? AgirlikToplamiKontrolu(SqlConnection connection, int agirlikYuzdesi, bool aktifMi, int? id)
-        {
-            if (agirlikYuzdesi < 0 || agirlikYuzdesi > 100)
-                return new BadRequestObjectResult(new { mesaj = "Ağırlık yüzdesi 0 ile 100 arasında olmalıdır." });
-
-            if (!aktifMi) return null;
-
-            var sql = "SELECT ISNULL(SUM(AgirlikYuzdesi), 0) FROM AnaBasliklar WHERE AktifMi = 1" + (id != null ? " AND Id != @Id" : "");
-            var digerAktifToplam = connection.ExecuteScalar<int>(sql, new { Id = id });
-
-            if (digerAktifToplam + agirlikYuzdesi > 100)
-            {
-                return new BadRequestObjectResult(new
-                {
-                    mesaj = "Aktif ana kriterlerin toplam ağırlığı %100'ü geçemez."
-                });
-            }
-            return null;
         }
 
         [HttpPost]
@@ -64,11 +46,20 @@ namespace ITPerformansAPI.Controllers
         {
             using var connection = new SqlConnection(_connectionString);
 
-            var agirlikHatasi = AgirlikToplamiKontrolu(connection, yeni.AgirlikYuzdesi, yeni.AktifMi, null);
-            if (agirlikHatasi != null) return agirlikHatasi;
+            try
+            {
+                connection.Execute("usp_AnaBasliklar_Create", new
+                {
+                    yeni.Baslik,
+                    yeni.AgirlikYuzdesi,
+                    yeni.AktifMi
+                }, commandType: CommandType.StoredProcedure);
+            }
+            catch (SqlException ex)
+            {
+                return BadRequest(new { mesaj = ex.Message });
+            }
 
-            var sql = "INSERT INTO AnaBasliklar (Baslik, AgirlikYuzdesi, AktifMi) VALUES (@Baslik, @AgirlikYuzdesi, @AktifMi)";
-            connection.Execute(sql, yeni);
             return Ok("Eklendi");
         }
 
@@ -77,15 +68,21 @@ namespace ITPerformansAPI.Controllers
         public IActionResult Update(int id, [FromBody] AnaBaslik guncellendi)
         {
             using var connection = new SqlConnection(_connectionString);
-            guncellendi.Id = id;
 
-            var agirlikHatasi = AgirlikToplamiKontrolu(connection, guncellendi.AgirlikYuzdesi, guncellendi.AktifMi, id);
-            if (agirlikHatasi != null) return agirlikHatasi;
-
-            connection.Execute("UPDATE AnaBasliklar SET Baslik=@Baslik, AgirlikYuzdesi=@AgirlikYuzdesi, AktifMi=@AktifMi WHERE Id=@Id", guncellendi);
-
-            // Ana baslik pasife/aktif alindiginda, altindaki tum alt kriterler de ayni duruma getirilir.
-            connection.Execute("UPDATE AltKriterler SET AktifMi=@AktifMi WHERE AnaBaslikId=@Id", new { guncellendi.AktifMi, Id = id });
+            try
+            {
+                connection.Execute("usp_AnaBasliklar_Update", new
+                {
+                    Id = id,
+                    guncellendi.Baslik,
+                    guncellendi.AgirlikYuzdesi,
+                    guncellendi.AktifMi
+                }, commandType: CommandType.StoredProcedure);
+            }
+            catch (SqlException ex)
+            {
+                return BadRequest(new { mesaj = ex.Message });
+            }
 
             return Ok("Guncellendi");
         }
@@ -96,17 +93,15 @@ namespace ITPerformansAPI.Controllers
         {
             using var connection = new SqlConnection(_connectionString);
 
-            var altKriterSayisi = connection.ExecuteScalar<int>(
-                "SELECT COUNT(*) FROM AltKriterler WHERE AnaBaslikId = @Id", new { Id = id });
-            if (altKriterSayisi > 0)
+            try
             {
-                return BadRequest(new
-                {
-                    mesaj = "Bu ana kriterin altında hâlâ alt kriterler var. Önce onları silin veya başka bir ana kritere taşıyın."
-                });
+                connection.Execute("usp_AnaBasliklar_Delete", new { Id = id }, commandType: CommandType.StoredProcedure);
+            }
+            catch (SqlException ex)
+            {
+                return BadRequest(new { mesaj = ex.Message });
             }
 
-            connection.Execute("DELETE FROM AnaBasliklar WHERE Id=@Id", new { Id = id });
             return Ok("Silindi");
         }
     }

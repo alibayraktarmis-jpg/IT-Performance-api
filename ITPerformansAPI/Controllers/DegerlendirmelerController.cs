@@ -1,13 +1,14 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Dapper;
+using ITPerformansAPI.Helpers;
+using ITPerformansAPI.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
-using Dapper;
-using ITPerformansAPI.Models;
-using ITPerformansAPI.Helpers;
-using System.Security.Claims;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
+using System.Data;
+using System.Security.Claims;
 
 namespace ITPerformansAPI.Controllers
 {
@@ -30,26 +31,10 @@ namespace ITPerformansAPI.Controllers
             var kullaniciId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
 
             using var connection = new SqlConnection(_connectionString);
-
-            if (rol == "Admin")
-            {
-                var liste = connection.Query<Degerlendirme>("SELECT * FROM Degerlendirmeler").ToList();
-                return Ok(liste);
-            }
-            else if (rol == "Evaluator")
-            {
-                var liste = connection.Query<Degerlendirme>(
-                    "SELECT * FROM Degerlendirmeler WHERE DegerlendiricId = @Id",
-                    new { Id = kullaniciId }).ToList();
-                return Ok(liste);
-            }
-            else
-            {
-                var liste = connection.Query<Degerlendirme>(
-                    "SELECT * FROM Degerlendirmeler WHERE CalisanId = @Id",
-                    new { Id = kullaniciId }).ToList();
-                return Ok(liste);
-            }
+            var liste = connection.Query<Degerlendirme>(
+                "usp_Degerlendirmeler_GetAll", new { Rol = rol, KullaniciId = kullaniciId },
+                commandType: CommandType.StoredProcedure).ToList();
+            return Ok(liste);
         }
 
         [HttpGet("calisan/{calisanId}")]
@@ -59,7 +44,9 @@ namespace ITPerformansAPI.Controllers
             var erisimHatasi = CalisanErisimKontrolu(connection, calisanId);
             if (erisimHatasi != null) return erisimHatasi;
 
-            var degerlendirmeler = connection.Query<Degerlendirme>("SELECT * FROM Degerlendirmeler WHERE CalisanId = @CalisanId", new { CalisanId = calisanId }).ToList();
+            var degerlendirmeler = connection.Query<Degerlendirme>(
+                "usp_Degerlendirmeler_GetByCalisanId", new { CalisanId = calisanId },
+                commandType: CommandType.StoredProcedure).ToList();
             return Ok(degerlendirmeler);
         }
 
@@ -70,13 +57,14 @@ namespace ITPerformansAPI.Controllers
             var erisimHatasi = CalisanErisimKontrolu(connection, calisanId);
             if (erisimHatasi != null) return erisimHatasi;
 
-            var deg = connection.QueryFirstOrDefault<Degerlendirme>(
-                "SELECT TOP 1 * FROM Degerlendirmeler WHERE CalisanId = @CalisanId AND Donem = @Donem ORDER BY Id DESC",
-                new { CalisanId = calisanId, Donem = donem });
+            using var sonuclar = connection.QueryMultiple(
+                "usp_Degerlendirmeler_GetByCalisanDonem", new { CalisanId = calisanId, Donem = donem },
+                commandType: CommandType.StoredProcedure);
+
+            var deg = sonuclar.ReadFirstOrDefault<Degerlendirme>();
+            var detaylar = sonuclar.Read<DegerlendirmeDetay>().ToList();
+
             if (deg == null) return Ok(null);
-            var detaylar = connection.Query<DegerlendirmeDetay>(
-                "SELECT * FROM DegerlendirmeDetaylar WHERE DegerlendirmeId = @Id",
-                new { Id = deg.Id }).ToList();
             return Ok(new { degerlendirme = deg, detaylar });
         }
 
@@ -89,23 +77,27 @@ namespace ITPerformansAPI.Controllers
 
             using var connection = new SqlConnection(_connectionString);
 
-            var calisanId = connection.QueryFirstOrDefault<int?>("SELECT CalisanId FROM Degerlendirmeler WHERE Id = @Id", new { Id = id });
+            var calisanId = connection.QueryFirstOrDefault<int?>(
+                "usp_Degerlendirmeler_GetCalisanId", new { Id = id },
+                commandType: CommandType.StoredProcedure);
             if (calisanId == null) return NotFound(new { mesaj = "Degerlendirme bulunamadi" });
 
             var erisimHatasi = CalisanErisimKontrolu(connection, calisanId.Value);
             if (erisimHatasi != null) return erisimHatasi;
 
-            connection.Execute("DELETE FROM DegerlendirmeDetaylar WHERE DegerlendirmeId = @Id", new { Id = id });
+            connection.Execute("usp_Degerlendirmeler_DetaylarSil", new { DegerlendirmeId = id }, commandType: CommandType.StoredProcedure);
             foreach (var d in dto.Detaylar)
             {
-                connection.Execute("INSERT INTO DegerlendirmeDetaylar (DegerlendirmeId, AltKriterId, Puan) VALUES (@DegerlendirmeId, @AltKriterId, @Puan)",
-                    new { DegerlendirmeId = id, d.AltKriterId, d.Puan });
+                connection.Execute("usp_DegerlendirmeDetaylar_Create",
+                    new { DegerlendirmeId = id, d.AltKriterId, d.Puan },
+                    commandType: CommandType.StoredProcedure);
             }
 
             // Toplam skor istemciden gelen degerle degil, kaydedilen detaylardan sunucuda yeniden hesaplanir
             var hesaplananSkor = SkorHesaplayici.Hesapla(connection, id);
-            connection.Execute("UPDATE Degerlendirmeler SET Yorum=@Yorum, ToplamSkor=@ToplamSkor, Tarih=@Tarih WHERE Id=@Id",
-                new { dto.Yorum, ToplamSkor = hesaplananSkor, Tarih = DateTime.Now, Id = id });
+            connection.Execute("usp_Degerlendirmeler_UpdateYorumSkor",
+                new { Id = id, dto.Yorum, ToplamSkor = hesaplananSkor, Tarih = DateTime.Now },
+                commandType: CommandType.StoredProcedure);
 
             return Ok(new { mesaj = "Degerlendirme guncellendi", toplamSkor = hesaplananSkor });
         }
@@ -141,20 +133,22 @@ namespace ITPerformansAPI.Controllers
             if (rol == "Evaluator")
                 yeni.DegerlendiricId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
 
-            var mevcutMu = connection.QueryFirstOrDefault<int?>(
-                "SELECT Id FROM Degerlendirmeler WHERE CalisanId = @CalisanId AND Donem = @Donem",
-                new { yeni.CalisanId, yeni.Donem });
-            if (mevcutMu != null)
-                return Conflict(new { mesaj = "Bu calisan icin bu doneme ait bir degerlendirme zaten mevcut.", id = mevcutMu });
+            var parametreler = new DynamicParameters();
+            parametreler.Add("DegerlendiricId", yeni.DegerlendiricId);
+            parametreler.Add("CalisanId", yeni.CalisanId);
+            parametreler.Add("Tarih", yeni.Tarih);
+            parametreler.Add("Donem", yeni.Donem);
+            parametreler.Add("Yorum", yeni.Yorum);
+            parametreler.Add("YeniId", dbType: DbType.Int32, direction: ParameterDirection.Output);
+            parametreler.Add("MevcutId", dbType: DbType.Int32, direction: ParameterDirection.Output);
 
-            // Toplam skor istemciden gelen degerle degil, kayitli detaylardan hesaplanir;
-            // olusturma anda henuz detay girilmedigi icin baslangicta 0 kaydedilir ve
-            // her DegerlendirmeDetaylar eklendikce sunucuda yeniden hesaplanip guncellenir.
-            var sql = @"INSERT INTO Degerlendirmeler
-                (DegerlendiricId, CalisanId, Tarih, Donem, Yorum, ToplamSkor)
-                OUTPUT INSERTED.Id
-                VALUES (@DegerlendiricId, @CalisanId, @Tarih, @Donem, @Yorum, 0)";
-            var yeniId = connection.ExecuteScalar<int>(sql, yeni);
+            connection.Execute("usp_Degerlendirmeler_Create", parametreler, commandType: CommandType.StoredProcedure);
+
+            var mevcutId = parametreler.Get<int?>("MevcutId");
+            if (mevcutId != null)
+                return Conflict(new { mesaj = "Bu calisan icin bu doneme ait bir degerlendirme zaten mevcut.", id = mevcutId });
+
+            var yeniId = parametreler.Get<int>("YeniId");
             return Ok(new { mesaj = "Degerlendirme eklendi", id = yeniId });
         }
 
@@ -164,7 +158,9 @@ namespace ITPerformansAPI.Controllers
         {
             using var connection = new SqlConnection(_connectionString);
 
-            var mevcut = connection.QueryFirstOrDefault<Degerlendirme>("SELECT * FROM Degerlendirmeler WHERE Id = @Id", new { Id = id });
+            var mevcut = connection.QueryFirstOrDefault<Degerlendirme>(
+                "usp_Degerlendirmeler_GetById", new { Id = id },
+                commandType: CommandType.StoredProcedure);
             if (mevcut == null) return NotFound(new { mesaj = "Degerlendirme bulunamadi" });
 
             var erisimHatasi = CalisanErisimKontrolu(connection, mevcut.CalisanId);
@@ -182,17 +178,17 @@ namespace ITPerformansAPI.Controllers
 
             // Toplam skor burada da client'tan degil, kayitli detaylardan sunucuda hesaplanir
             var hesaplananSkor = SkorHesaplayici.Hesapla(connection, id);
-            var sql = "UPDATE Degerlendirmeler SET DegerlendiricId=@DegerlendiricId, CalisanId=@CalisanId, Tarih=@Tarih, Donem=@Donem, Yorum=@Yorum, ToplamSkor=@ToplamSkor WHERE Id=@Id";
-            connection.Execute(sql, new
+            connection.Execute("usp_Degerlendirmeler_Update", new
             {
+                Id = id,
                 guncellendi.DegerlendiricId,
                 guncellendi.CalisanId,
                 guncellendi.Tarih,
                 guncellendi.Donem,
                 guncellendi.Yorum,
-                ToplamSkor = hesaplananSkor,
-                Id = id
-            });
+                ToplamSkor = hesaplananSkor
+            }, commandType: CommandType.StoredProcedure);
+
             return Ok(new { mesaj = "Degerlendirme guncellendi", toplamSkor = hesaplananSkor });
         }
 
@@ -201,7 +197,7 @@ namespace ITPerformansAPI.Controllers
         public IActionResult DeleteDegerlendirme(int id)
         {
             using var connection = new SqlConnection(_connectionString);
-            connection.Execute("DELETE FROM Degerlendirmeler WHERE Id=@Id", new { Id = id });
+            connection.Execute("usp_Degerlendirmeler_Delete", new { Id = id }, commandType: CommandType.StoredProcedure);
             return Ok(new { mesaj = "Degerlendirme silindi" });
         }
 
@@ -209,7 +205,7 @@ namespace ITPerformansAPI.Controllers
         public IActionResult GetDonemler()
         {
             using var connection = new SqlConnection(_connectionString);
-            var donemler = connection.Query<string>("SELECT DISTINCT Donem FROM Degerlendirmeler WHERE Donem IS NOT NULL AND Donem != '' ORDER BY Donem DESC").ToList();
+            var donemler = connection.Query<string>("usp_Degerlendirmeler_GetDonemler", commandType: CommandType.StoredProcedure).ToList();
             return Ok(donemler);
         }
 
@@ -220,20 +216,9 @@ namespace ITPerformansAPI.Controllers
             var erisimHatasi = CalisanErisimKontrolu(connection, calisanId);
             if (erisimHatasi != null) return erisimHatasi;
 
-            var sql = @"
-                SELECT
-                    ab.Baslik AS baslik,
-                    ab.AgirlikYuzdesi AS agirlikYuzdesi,
-                    AVG(CAST(dd.Puan AS FLOAT)) AS ortalamaPuan
-                FROM DegerlendirmeDetaylar dd
-                INNER JOIN AltKriterler ak ON dd.AltKriterId = ak.Id
-                INNER JOIN AnaBasliklar ab ON ak.AnaBaslikId = ab.Id
-                INNER JOIN Degerlendirmeler d ON dd.DegerlendirmeId = d.Id
-                WHERE d.CalisanId = @CalisanId
-                " + (donem != null ? "AND d.Donem = @Donem" : "") + @"
-                GROUP BY ab.Baslik, ab.AgirlikYuzdesi";
-
-            var kategoriSkorlar = connection.Query(sql, new { CalisanId = calisanId, Donem = donem }).ToList();
+            var kategoriSkorlar = connection.Query(
+                "usp_Degerlendirmeler_KategoriDetay", new { CalisanId = calisanId, Donem = donem },
+                commandType: CommandType.StoredProcedure).ToList();
 
             double toplamSkor = 0;
             foreach (var kategori in kategoriSkorlar)
@@ -257,44 +242,9 @@ namespace ITPerformansAPI.Controllers
             var kullaniciId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
 
             using var connection = new SqlConnection(_connectionString);
-
-            string donemFilter = donem != null ? "AND d.Donem = @Donem" : "";
-            string sql;
-
-            if (rol == "Admin")
-            {
-                sql = $@"
-                    SELECT k.Id AS id, k.Ad AS ad, k.Soyad AS soyad, k.Departman AS departman, k.Rol AS rol,
-                           AVG(d.ToplamSkor) AS ortalamaToplamSkor
-                    FROM Kullanicilar k
-                    LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId {donemFilter}
-                    GROUP BY k.Id, k.Ad, k.Soyad, k.Departman, k.Rol
-                    ORDER BY ortalamaToplamSkor DESC";
-            }
-            else if (rol == "Evaluator")
-            {
-                sql = $@"
-                    SELECT k.Id AS id, k.Ad AS ad, k.Soyad AS soyad, k.Departman AS departman, k.Rol AS rol,
-                           AVG(d.ToplamSkor) AS ortalamaToplamSkor
-                    FROM Kullanicilar k
-                    LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId {donemFilter}
-                    WHERE k.Rol = 'Employee' AND k.EvaluatorId = @KullaniciId
-                    GROUP BY k.Id, k.Ad, k.Soyad, k.Departman, k.Rol
-                    ORDER BY ortalamaToplamSkor DESC";
-            }
-            else
-            {
-                sql = $@"
-                    SELECT k.Id AS id, k.Ad AS ad, k.Soyad AS soyad, k.Departman AS departman, k.Rol AS rol,
-                           AVG(d.ToplamSkor) AS ortalamaToplamSkor
-                    FROM Kullanicilar k
-                    LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId {donemFilter}
-                    WHERE k.Id = @KullaniciId
-                    GROUP BY k.Id, k.Ad, k.Soyad, k.Departman, k.Rol
-                    ORDER BY ortalamaToplamSkor DESC";
-            }
-
-            var sonuc = connection.Query(sql, new { KullaniciId = kullaniciId, Donem = donem }).ToList();
+            var sonuc = connection.Query(
+                "usp_Degerlendirmeler_GetSiralama", new { Rol = rol, KullaniciId = kullaniciId, Donem = donem },
+                commandType: CommandType.StoredProcedure).ToList();
             return Ok(sonuc);
         }
 
@@ -305,16 +255,9 @@ namespace ITPerformansAPI.Controllers
             using var connection = new SqlConnection(_connectionString);
             var donemParam = string.IsNullOrEmpty(donem) ? null : donem;
 
-            var sql = @"
-                SELECT k.Id, k.Ad, k.Soyad, k.Departman,
-                       AVG(d.ToplamSkor) AS OrtalamaToplamSkor
-                FROM Kullanicilar k
-                LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId AND (@Donem IS NULL OR d.Donem = @Donem)
-                WHERE k.Rol = 'Employee'
-                GROUP BY k.Id, k.Ad, k.Soyad, k.Departman
-                ORDER BY OrtalamaToplamSkor DESC";
-
-            var veriler = connection.Query(sql, new { Donem = donemParam }).ToList();
+            var veriler = connection.Query(
+                "usp_Degerlendirmeler_RaporVerileri", new { Donem = donemParam },
+                commandType: CommandType.StoredProcedure).ToList();
 
             var departmanOzet = veriler
                 .GroupBy(v => (string)v.Departman)
@@ -329,23 +272,16 @@ namespace ITPerformansAPI.Controllers
                 .OrderByDescending(d => d.OrtalamaSkor ?? -1)
                 .ToList();
 
-            var kategoriler = connection.Query<string>(
-                "SELECT Baslik FROM AnaBasliklar WHERE AktifMi = 1 ORDER BY AgirlikYuzdesi DESC").ToList();
+            var kategoriler = connection.Query(
+                "usp_Degerlendirmeler_AktifKategoriler", commandType: CommandType.StoredProcedure)
+                .Select(k => (Id: (int)k.Id, Baslik: (string)k.Baslik)).ToList();
 
-            var kategoriSql = @"
-                SELECT d.CalisanId AS CalisanId, ab.Baslik AS Baslik, AVG(CAST(dd.Puan AS FLOAT)) AS OrtalamaPuan
-                FROM DegerlendirmeDetaylar dd
-                INNER JOIN AltKriterler ak ON dd.AltKriterId = ak.Id
-                INNER JOIN AnaBasliklar ab ON ak.AnaBaslikId = ab.Id
-                INNER JOIN Degerlendirmeler d ON dd.DegerlendirmeId = d.Id
-                INNER JOIN Kullanicilar k ON d.CalisanId = k.Id
-                WHERE k.Rol = 'Employee' AND (@Donem IS NULL OR d.Donem = @Donem)
-                GROUP BY d.CalisanId, ab.Baslik";
-
-            var kategoriPuanlari = new Dictionary<(int CalisanId, string Baslik), double>();
-            foreach (var kv in connection.Query(kategoriSql, new { Donem = donemParam }))
+            var kategoriPuanlari = new Dictionary<(int CalisanId, int AnaBaslikId), double>();
+            foreach (var kv in connection.Query(
+                "usp_Degerlendirmeler_KategoriPuanlari", new { Donem = donemParam },
+                commandType: CommandType.StoredProcedure))
             {
-                kategoriPuanlari[((int)kv.CalisanId, (string)kv.Baslik)] = (double)kv.OrtalamaPuan;
+                kategoriPuanlari[((int)kv.CalisanId, (int)kv.AnaBaslikId)] = (double)kv.OrtalamaPuan;
             }
 
             var baslikRengi = System.Drawing.ColorTranslator.FromHtml("#F1F5F9");
@@ -430,7 +366,7 @@ namespace ITPerformansAPI.Controllers
             {
                 var s3 = paket.Workbook.Worksheets.Add("Kategori Puanları");
                 s3.Cells[1, 1].Value = "Ad Soyad";
-                for (int k = 0; k < kategoriler.Count; k++) s3.Cells[1, k + 2].Value = kategoriler[k];
+                for (int k = 0; k < kategoriler.Count; k++) s3.Cells[1, k + 2].Value = kategoriler[k].Baslik;
                 BaslikStilVer(s3.Cells[1, 1, 1, kategoriler.Count + 1]);
 
                 for (int i = 0; i < veriler.Count; i++)
@@ -442,7 +378,7 @@ namespace ITPerformansAPI.Controllers
                     s3.Cells[satir, 1].Value = $"{v.Ad} {v.Soyad}";
                     for (int k = 0; k < kategoriler.Count; k++)
                     {
-                        var puan = kategoriPuanlari.TryGetValue((calisanId, kategoriler[k]), out var p) ? p : (double?)null;
+                        var puan = kategoriPuanlari.TryGetValue((calisanId, kategoriler[k].Id), out var p) ? p : (double?)null;
                         var hucre = s3.Cells[satir, k + 2];
                         if (puan.HasValue) hucre.Value = Math.Round(puan.Value, 1);
                         hucre.Style.Numberformat.Format = "0.0";
@@ -479,16 +415,9 @@ namespace ITPerformansAPI.Controllers
             var donemParam = string.IsNullOrEmpty(donem) ? null : donem;
             var donemMetni = donemParam ?? "Tüm Dönemler";
 
-            var sql = @"
-                SELECT k.Id, k.Ad, k.Soyad, k.Departman,
-                       AVG(d.ToplamSkor) AS OrtalamaToplamSkor
-                FROM Kullanicilar k
-                LEFT JOIN Degerlendirmeler d ON k.Id = d.CalisanId AND (@Donem IS NULL OR d.Donem = @Donem)
-                WHERE k.Rol = 'Employee'
-                GROUP BY k.Id, k.Ad, k.Soyad, k.Departman
-                ORDER BY OrtalamaToplamSkor DESC";
-
-            var veriler = connection.Query(sql, new { Donem = donemParam }).ToList();
+            var veriler = connection.Query(
+                "usp_Degerlendirmeler_RaporVerileri", new { Donem = donemParam },
+                commandType: CommandType.StoredProcedure).ToList();
 
             var degerlendirilenler = veriler.Where(v => v.OrtalamaToplamSkor != null).ToList();
             int toplamCalisan = veriler.Count;
@@ -509,23 +438,16 @@ namespace ITPerformansAPI.Controllers
                 .OrderByDescending(d => d.OrtalamaSkor ?? -1)
                 .ToList();
 
-            var kategoriler = connection.Query<string>(
-                "SELECT Baslik FROM AnaBasliklar WHERE AktifMi = 1 ORDER BY AgirlikYuzdesi DESC").ToList();
+            var kategoriler = connection.Query(
+                "usp_Degerlendirmeler_AktifKategoriler", commandType: CommandType.StoredProcedure)
+                .Select(k => (Id: (int)k.Id, Baslik: (string)k.Baslik)).ToList();
 
-            var kategoriSql = @"
-                SELECT d.CalisanId AS CalisanId, ab.Baslik AS Baslik, AVG(CAST(dd.Puan AS FLOAT)) AS OrtalamaPuan
-                FROM DegerlendirmeDetaylar dd
-                INNER JOIN AltKriterler ak ON dd.AltKriterId = ak.Id
-                INNER JOIN AnaBasliklar ab ON ak.AnaBaslikId = ab.Id
-                INNER JOIN Degerlendirmeler d ON dd.DegerlendirmeId = d.Id
-                INNER JOIN Kullanicilar k ON d.CalisanId = k.Id
-                WHERE k.Rol = 'Employee' AND (@Donem IS NULL OR d.Donem = @Donem)
-                GROUP BY d.CalisanId, ab.Baslik";
-
-            var kategoriPuanlari = new Dictionary<(int CalisanId, string Baslik), double>();
-            foreach (var kv in connection.Query(kategoriSql, new { Donem = donemParam }))
+            var kategoriPuanlari = new Dictionary<(int CalisanId, int AnaBaslikId), double>();
+            foreach (var kv in connection.Query(
+                "usp_Degerlendirmeler_KategoriPuanlari", new { Donem = donemParam },
+                commandType: CommandType.StoredProcedure))
             {
-                kategoriPuanlari[((int)kv.CalisanId, (string)kv.Baslik)] = (double)kv.OrtalamaPuan;
+                kategoriPuanlari[((int)kv.CalisanId, (int)kv.AnaBaslikId)] = (double)kv.OrtalamaPuan;
             }
 
             var bgSayfa = Colors.White;
@@ -698,7 +620,7 @@ namespace ITPerformansAPI.Controllers
                                     foreach (var kategori in kategoriler)
                                     {
                                         header.Cell().Background(bgBaslikTablo).BorderBottom(1).BorderColor(cizgiRengi).PaddingVertical(8).PaddingHorizontal(6)
-                                            .AlignCenter().Text(kategori).FontSize(9).FontColor(metinBaslikTablo).Bold();
+                                            .AlignCenter().Text(kategori.Baslik).FontSize(9).FontColor(metinBaslikTablo).Bold();
                                     }
                                 });
 
@@ -709,7 +631,7 @@ namespace ITPerformansAPI.Controllers
                                     table.Cell().BorderBottom(1).BorderColor(cizgiRengi).PaddingVertical(8).PaddingHorizontal(6).Text($"{v.Ad} {v.Soyad}").FontColor(metinAna);
                                     foreach (var kategori in kategoriler)
                                     {
-                                        var puan = kategoriPuanlari.TryGetValue((calisanId, kategori), out var p) ? p : (double?)null;
+                                        var puan = kategoriPuanlari.TryGetValue((calisanId, kategori.Id), out var p) ? p : (double?)null;
                                         var puanStr = puan.HasValue ? puan.Value.ToString("F1") : "-";
                                         table.Cell().BorderBottom(1).BorderColor(cizgiRengi).PaddingVertical(8).PaddingHorizontal(6).AlignCenter().Text(puanStr).Bold().FontColor(kategoriRengi(puan));
                                     }

@@ -1,0 +1,7 @@
+CREATE OR ALTER PROCEDURE usp_AnaBasliklar_GetById
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT * FROM AnaBasliklar WHERE Id = @Id;
+END

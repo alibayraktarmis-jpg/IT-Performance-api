@@ -1,0 +1,7 @@
+CREATE OR ALTER PROCEDURE usp_AltKriterler_GetById
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT * FROM AltKriterler WHERE Id = @Id;
+END

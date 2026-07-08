@@ -1,0 +1,7 @@
+CREATE OR ALTER PROCEDURE usp_Hedefler_Delete
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM Hedefler WHERE Id = @Id;
+END

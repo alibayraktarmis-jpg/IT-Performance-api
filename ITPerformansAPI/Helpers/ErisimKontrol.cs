@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Data;
 using Dapper;
 using Microsoft.Data.SqlClient;
 
@@ -16,8 +17,9 @@ namespace ITPerformansAPI.Helpers
 
             var kullaniciId = int.Parse(user.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
             var gecerliMi = connection.QueryFirstOrDefault<int?>(
-                "SELECT Id FROM Kullanicilar WHERE Id = @CalisanId AND EvaluatorId = @EvaluatorId",
-                new { CalisanId = calisanId, EvaluatorId = kullaniciId });
+                "usp_Kullanicilar_EvaluatorKendiEkibindeMi",
+                new { CalisanId = calisanId, EvaluatorId = kullaniciId },
+                commandType: CommandType.StoredProcedure);
             return gecerliMi != null;
         }
     }

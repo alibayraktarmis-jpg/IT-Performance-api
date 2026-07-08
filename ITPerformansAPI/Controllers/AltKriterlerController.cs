@@ -1,8 +1,9 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Dapper;
 using ITPerformansAPI.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
+using System.Data;
 
 namespace ITPerformansAPI.Controllers
 {
@@ -22,8 +23,9 @@ namespace ITPerformansAPI.Controllers
         public IActionResult GetAll([FromQuery] bool sadaceAktif = false)
         {
             using var connection = new SqlConnection(_connectionString);
-            var sql = sadaceAktif ? "SELECT * FROM AltKriterler WHERE AktifMi = 1" : "SELECT * FROM AltKriterler";
-            var liste = connection.Query<AltKriter>(sql).ToList();
+            var liste = connection.Query<AltKriter>(
+                "usp_AltKriterler_GetAll", new { SadeceAktif = sadaceAktif },
+                commandType: CommandType.StoredProcedure).ToList();
             return Ok(liste);
         }
 
@@ -31,7 +33,9 @@ namespace ITPerformansAPI.Controllers
         public IActionResult GetById(int id)
         {
             using var connection = new SqlConnection(_connectionString);
-            var kriter = connection.QueryFirstOrDefault<AltKriter>("SELECT * FROM AltKriterler WHERE Id = @Id", new { Id = id });
+            var kriter = connection.QueryFirstOrDefault<AltKriter>(
+                "usp_AltKriterler_GetById", new { Id = id },
+                commandType: CommandType.StoredProcedure);
             if (kriter == null) return NotFound();
             return Ok(kriter);
         }
@@ -40,7 +44,9 @@ namespace ITPerformansAPI.Controllers
         public IActionResult GetByAnaBaslik(int anaBaslikId)
         {
             using var connection = new SqlConnection(_connectionString);
-            var liste = connection.Query<AltKriter>("SELECT * FROM AltKriterler WHERE AnaBaslikId = @AnaBaslikId", new { AnaBaslikId = anaBaslikId }).ToList();
+            var liste = connection.Query<AltKriter>(
+                "usp_AltKriterler_GetByAnaBaslik", new { AnaBaslikId = anaBaslikId },
+                commandType: CommandType.StoredProcedure).ToList();
             return Ok(liste);
         }
 
@@ -49,8 +55,9 @@ namespace ITPerformansAPI.Controllers
         public IActionResult Create([FromBody] AltKriter yeni)
         {
             using var connection = new SqlConnection(_connectionString);
-            var sql = "INSERT INTO AltKriterler (AnaBaslikId, KriterAdi, AktifMi) OUTPUT INSERTED.Id VALUES (@AnaBaslikId, @KriterAdi, @AktifMi)";
-            var yeniId = connection.ExecuteScalar<int>(sql, yeni);
+            var yeniId = connection.ExecuteScalar<int>(
+                "usp_AltKriterler_Create", new { yeni.AnaBaslikId, yeni.KriterAdi, yeni.AktifMi },
+                commandType: CommandType.StoredProcedure);
             return Ok(new { mesaj = "Eklendi", id = yeniId });
         }
 
@@ -59,9 +66,8 @@ namespace ITPerformansAPI.Controllers
         public IActionResult Update(int id, [FromBody] AltKriter guncellendi)
         {
             using var connection = new SqlConnection(_connectionString);
-            var sql = "UPDATE AltKriterler SET AnaBaslikId=@AnaBaslikId, KriterAdi=@KriterAdi, AktifMi=@AktifMi WHERE Id=@Id";
             guncellendi.Id = id;
-            connection.Execute(sql, guncellendi);
+            connection.Execute("usp_AltKriterler_Update", guncellendi, commandType: CommandType.StoredProcedure);
             return Ok("Guncellendi");
         }
 
@@ -71,17 +77,15 @@ namespace ITPerformansAPI.Controllers
         {
             using var connection = new SqlConnection(_connectionString);
 
-            var kullanilmisMi = connection.ExecuteScalar<int>(
-                "SELECT COUNT(*) FROM DegerlendirmeDetaylar WHERE AltKriterId = @Id", new { Id = id });
-            if (kullanilmisMi > 0)
+            try
             {
-                return BadRequest(new
-                {
-                    mesaj = "Bu alt kriter geçmiş değerlendirmelerde kullanılmış, silinemez. Bunun yerine pasife alabilirsiniz."
-                });
+                connection.Execute("usp_AltKriterler_Delete", new { Id = id }, commandType: CommandType.StoredProcedure);
+            }
+            catch (SqlException ex)
+            {
+                return BadRequest(new { mesaj = ex.Message });
             }
 
-            connection.Execute("DELETE FROM AltKriterler WHERE Id=@Id", new { Id = id });
             return Ok("Silindi");
         }
     }

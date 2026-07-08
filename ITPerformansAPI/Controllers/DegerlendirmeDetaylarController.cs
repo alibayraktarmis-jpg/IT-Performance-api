@@ -1,10 +1,11 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Dapper;
 using ITPerformansAPI.Models;
 using ITPerformansAPI.Helpers;
 using System.Security.Claims;
+using System.Data;
 
 namespace ITPerformansAPI.Controllers
 {
@@ -25,8 +26,8 @@ namespace ITPerformansAPI.Controllers
         {
             using var connection = new SqlConnection(_connectionString);
             var liste = connection.Query<DegerlendirmeDetay>(
-                "SELECT * FROM DegerlendirmeDetaylar WHERE DegerlendirmeId = @DegerlendirmeId",
-                new { DegerlendirmeId = degerlendirmeId }).ToList();
+                "usp_DegerlendirmeDetaylar_GetByDegerlendirme", new { DegerlendirmeId = degerlendirmeId },
+                commandType: CommandType.StoredProcedure).ToList();
             return Ok(liste);
         }
 
@@ -42,8 +43,9 @@ namespace ITPerformansAPI.Controllers
             var erisimHatasi = DegerlendirmeErisimKontrolu(connection, yeni.DegerlendirmeId);
             if (erisimHatasi != null) return erisimHatasi;
 
-            var sql = "INSERT INTO DegerlendirmeDetaylar (DegerlendirmeId, AltKriterId, Puan) VALUES (@DegerlendirmeId, @AltKriterId, @Puan)";
-            connection.Execute(sql, yeni);
+            connection.Execute("usp_DegerlendirmeDetaylar_Create",
+                new { yeni.DegerlendirmeId, yeni.AltKriterId, yeni.Puan },
+                commandType: CommandType.StoredProcedure);
 
             // Yeni detay eklendikce ust degerlendirmenin toplam skoru sunucuda yeniden hesaplanir
             SkorHesaplayici.YenidenHesaplaVeKaydet(connection, yeni.DegerlendirmeId);
@@ -56,13 +58,15 @@ namespace ITPerformansAPI.Controllers
         {
             using var connection = new SqlConnection(_connectionString);
 
-            var degerlendirmeId = connection.QueryFirstOrDefault<int?>("SELECT DegerlendirmeId FROM DegerlendirmeDetaylar WHERE Id = @Id", new { Id = id });
+            var degerlendirmeId = connection.QueryFirstOrDefault<int?>(
+                "usp_DegerlendirmeDetaylar_GetDegerlendirmeId", new { Id = id },
+                commandType: CommandType.StoredProcedure);
             if (degerlendirmeId == null) return NotFound();
 
             var erisimHatasi = DegerlendirmeErisimKontrolu(connection, degerlendirmeId.Value);
             if (erisimHatasi != null) return erisimHatasi;
 
-            connection.Execute("DELETE FROM DegerlendirmeDetaylar WHERE Id=@Id", new { Id = id });
+            connection.Execute("usp_DegerlendirmeDetaylar_Delete", new { Id = id }, commandType: CommandType.StoredProcedure);
 
             // Detay silindikce ust degerlendirmenin toplam skoru sunucuda yeniden hesaplanir
             SkorHesaplayici.YenidenHesaplaVeKaydet(connection, degerlendirmeId.Value);
@@ -75,7 +79,9 @@ namespace ITPerformansAPI.Controllers
             var rol = User.FindFirst(ClaimTypes.Role)?.Value;
             if (rol == "Admin") return null;
 
-            var calisanId = connection.QueryFirstOrDefault<int?>("SELECT CalisanId FROM Degerlendirmeler WHERE Id = @Id", new { Id = degerlendirmeId });
+            var calisanId = connection.QueryFirstOrDefault<int?>(
+                "usp_Degerlendirmeler_GetCalisanId", new { Id = degerlendirmeId },
+                commandType: CommandType.StoredProcedure);
             if (calisanId == null) return NotFound();
 
             return ErisimKontrol.EvaluatorKendiEkibindeMi(connection, User, calisanId.Value) ? null : Forbid();

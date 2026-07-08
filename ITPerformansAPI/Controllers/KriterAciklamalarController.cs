@@ -1,8 +1,9 @@
-﻿using Microsoft.AspNetCore.Authorization;   
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Dapper;
 using ITPerformansAPI.Models;
+using System.Data;
 
 namespace ITPerformansAPI.Controllers
 {
@@ -22,7 +23,7 @@ namespace ITPerformansAPI.Controllers
         public IActionResult GetAll()
         {
             using var connection = new SqlConnection(_connectionString);
-            var liste = connection.Query<KriterAciklama>("SELECT * FROM KriterAciklamalar").ToList();
+            var liste = connection.Query<KriterAciklama>("usp_KriterAciklamalar_GetAll", commandType: CommandType.StoredProcedure).ToList();
             return Ok(liste);
         }
 
@@ -30,7 +31,9 @@ namespace ITPerformansAPI.Controllers
         public IActionResult GetById(int id)
         {
             using var connection = new SqlConnection(_connectionString);
-            var aciklama = connection.QueryFirstOrDefault<KriterAciklama>("SELECT * FROM KriterAciklamalar WHERE Id = @Id", new { Id = id });
+            var aciklama = connection.QueryFirstOrDefault<KriterAciklama>(
+                "usp_KriterAciklamalar_GetById", new { Id = id },
+                commandType: CommandType.StoredProcedure);
             if (aciklama == null) return NotFound();
             return Ok(aciklama);
         }
@@ -39,7 +42,9 @@ namespace ITPerformansAPI.Controllers
         public IActionResult GetByAltKriter(int altKriterId)
         {
             using var connection = new SqlConnection(_connectionString);
-            var liste = connection.Query<KriterAciklama>("SELECT * FROM KriterAciklamalar WHERE AltKriterId = @AltKriterId", new { AltKriterId = altKriterId }).ToList();
+            var liste = connection.Query<KriterAciklama>(
+                "usp_KriterAciklamalar_GetByAltKriter", new { AltKriterId = altKriterId },
+                commandType: CommandType.StoredProcedure).ToList();
             return Ok(liste);
         }
 
@@ -48,8 +53,8 @@ namespace ITPerformansAPI.Controllers
         {
             using var connection = new SqlConnection(_connectionString);
             var aciklama = connection.QueryFirstOrDefault<KriterAciklama>(
-                "SELECT * FROM KriterAciklamalar WHERE AltKriterId = @AltKriterId AND Rol = @Rol",
-                new { AltKriterId = altKriterId, Rol = rol });
+                "usp_KriterAciklamalar_GetByAltKriterVeRol", new { AltKriterId = altKriterId, Rol = rol },
+                commandType: CommandType.StoredProcedure);
             if (aciklama == null) return NotFound();
             return Ok(aciklama);
         }
@@ -59,8 +64,9 @@ namespace ITPerformansAPI.Controllers
         public IActionResult Create([FromBody] KriterAciklama yeni)
         {
             using var connection = new SqlConnection(_connectionString);
-            var sql = "INSERT INTO KriterAciklamalar (AltKriterId, Rol, Aciklama) VALUES (@AltKriterId, @Rol, @Aciklama)";
-            connection.Execute(sql, yeni);
+            connection.Execute("usp_KriterAciklamalar_Create",
+                new { yeni.AltKriterId, yeni.Rol, yeni.Aciklama },
+                commandType: CommandType.StoredProcedure);
             return Ok("Eklendi");
         }
 
@@ -69,9 +75,8 @@ namespace ITPerformansAPI.Controllers
         public IActionResult Update(int id, [FromBody] KriterAciklama guncellendi)
         {
             using var connection = new SqlConnection(_connectionString);
-            var sql = "UPDATE KriterAciklamalar SET AltKriterId=@AltKriterId, Rol=@Rol, Aciklama=@Aciklama WHERE Id=@Id";
             guncellendi.Id = id;
-            connection.Execute(sql, guncellendi);
+            connection.Execute("usp_KriterAciklamalar_Update", guncellendi, commandType: CommandType.StoredProcedure);
             return Ok("Guncellendi");
         }
 
@@ -82,22 +87,9 @@ namespace ITPerformansAPI.Controllers
             using var connection = new SqlConnection(_connectionString);
             foreach (var a in aciklamalar)
             {
-                var mevcut = connection.QueryFirstOrDefault<KriterAciklama>(
-                    "SELECT * FROM KriterAciklamalar WHERE AltKriterId = @AltKriterId AND Rol = @Rol",
-                    new { AltKriterId = altKriterId, Rol = a.Rol });
-
-                if (mevcut != null)
-                {
-                    connection.Execute(
-                        "UPDATE KriterAciklamalar SET Aciklama = @Aciklama WHERE Id = @Id",
-                        new { Aciklama = a.Aciklama, Id = mevcut.Id });
-                }
-                else if (!string.IsNullOrWhiteSpace(a.Aciklama))
-                {
-                    connection.Execute(
-                        "INSERT INTO KriterAciklamalar (AltKriterId, Rol, Aciklama) VALUES (@AltKriterId, @Rol, @Aciklama)",
-                        new { AltKriterId = altKriterId, Rol = a.Rol, Aciklama = a.Aciklama });
-                }
+                connection.Execute("usp_KriterAciklamalar_Upsert",
+                    new { AltKriterId = altKriterId, a.Rol, a.Aciklama },
+                    commandType: CommandType.StoredProcedure);
             }
             return Ok(new { mesaj = "Açıklamalar kaydedildi" });
         }
@@ -107,7 +99,7 @@ namespace ITPerformansAPI.Controllers
         public IActionResult Delete(int id)
         {
             using var connection = new SqlConnection(_connectionString);
-            connection.Execute("DELETE FROM KriterAciklamalar WHERE Id=@Id", new { Id = id });
+            connection.Execute("usp_KriterAciklamalar_Delete", new { Id = id }, commandType: CommandType.StoredProcedure);
             return Ok("Silindi");
         }
     }

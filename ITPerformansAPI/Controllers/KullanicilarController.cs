@@ -7,6 +7,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using System.Data;
 
 namespace ITPerformansAPI.Controllers
 {
@@ -31,27 +32,11 @@ namespace ITPerformansAPI.Controllers
             var kullaniciId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
 
             using var connection = new SqlConnection(_connectionString);
-
-            if (rol == "Evaluator")
-            {
-                var liste = connection.Query<Kullanici>(
-                    "SELECT Id, Ad, Soyad, Email, Rol, Departman, AktifMi FROM Kullanicilar WHERE Rol = 'Employee' AND EvaluatorId = @Id",
-                    new { Id = kullaniciId }).ToList();
-                return Ok(liste);
-            }
-
-            if (rol == "Employee")
-            {
-                var kendisi = connection.Query<Kullanici>(
-                    "SELECT Id, Ad, Soyad, Email, Rol, Departman, AktifMi FROM Kullanicilar WHERE Id = @Id",
-                    new { Id = kullaniciId }).ToList();
-                return Ok(kendisi);
-            }
-
-            var tumListe = connection.Query<Kullanici>(
-                "SELECT Id, Ad, Soyad, Email, Rol, Departman, AktifMi, EvaluatorId FROM Kullanicilar"
-            ).ToList();
-            return Ok(tumListe);
+            var liste = connection.Query<Kullanici>(
+                "usp_Kullanicilar_GetAll",
+                new { Rol = rol, KullaniciId = kullaniciId },
+                commandType: CommandType.StoredProcedure).ToList();
+            return Ok(liste);
         }
 
         [HttpPost]
@@ -59,31 +44,27 @@ namespace ITPerformansAPI.Controllers
         public IActionResult CreateKullanici([FromBody] Kullanici yeniKullanici)
         {
             using var connection = new SqlConnection(_connectionString);
-
-            var tutarsizlikHatasi = DepartmanEvaluatorTutarliMi(connection, yeniKullanici.Rol, yeniKullanici.Departman, yeniKullanici.EvaluatorId);
-            if (tutarsizlikHatasi != null) return tutarsizlikHatasi;
-
             yeniKullanici.Sifre = BCrypt.Net.BCrypt.HashPassword(yeniKullanici.Sifre);
-            var sql = "INSERT INTO Kullanicilar (Ad, Soyad, Email, Sifre, Rol, Departman, EvaluatorId) VALUES (@Ad, @Soyad, @Email, @Sifre, @Rol, @Departman, @EvaluatorId)";
-            connection.Execute(sql, yeniKullanici);
+
+            try
+            {
+                connection.Execute("usp_Kullanicilar_Create", new
+                {
+                    yeniKullanici.Ad,
+                    yeniKullanici.Soyad,
+                    yeniKullanici.Email,
+                    yeniKullanici.Sifre,
+                    yeniKullanici.Rol,
+                    yeniKullanici.Departman,
+                    yeniKullanici.EvaluatorId
+                }, commandType: CommandType.StoredProcedure);
+            }
+            catch (SqlException ex)
+            {
+                return BadRequest(new { mesaj = ex.Message });
+            }
+
             return Ok(new { mesaj = "Kullanici basariyla eklendi" });
-        }
-
-        private IActionResult? DepartmanEvaluatorTutarliMi(SqlConnection connection, string rol, string departman, int? evaluatorId)
-        {
-            if (rol != "Employee" || evaluatorId == null) return null;
-
-            var evaluatorDepartman = connection.QueryFirstOrDefault<string>(
-                "SELECT Departman FROM Kullanicilar WHERE Id = @Id AND Rol = 'Evaluator'",
-                new { Id = evaluatorId });
-
-            if (evaluatorDepartman == null)
-                return BadRequest(new { mesaj = "Seçilen değerlendirici bulunamadı veya Evaluator rolünde değil." });
-
-            if (evaluatorDepartman != departman)
-                return BadRequest(new { mesaj = $"Değerlendiricinin departmanı ({evaluatorDepartman}) çalışanın departmanıyla ({departman}) uyuşmuyor." });
-
-            return null;
         }
 
         [HttpPost("login")]
@@ -91,8 +72,8 @@ namespace ITPerformansAPI.Controllers
         {
             using var connection = new SqlConnection(_connectionString);
             var kullanici = connection.QueryFirstOrDefault<Kullanici>(
-                "SELECT * FROM Kullanicilar WHERE Email = @Email",
-                new { Email = loginDto.Email });
+                "usp_Kullanicilar_GetByEmail", new { Email = loginDto.Email },
+                commandType: CommandType.StoredProcedure);
 
             if (kullanici == null) return Unauthorized(new { mesaj = "Email veya sifre yanlis" });
 
@@ -141,21 +122,26 @@ namespace ITPerformansAPI.Controllers
 
             using var connection = new SqlConnection(_connectionString);
 
-            var tutarsizlikHatasi = DepartmanEvaluatorTutarliMi(connection, guncelKullanici.Rol, guncelKullanici.Departman, guncelKullanici.EvaluatorId);
-            if (tutarsizlikHatasi != null) return tutarsizlikHatasi;
-
-            var sql = "UPDATE Kullanicilar SET Ad=@Ad, Soyad=@Soyad, Email=@Email, Rol=@Rol, Departman=@Departman, EvaluatorId=@EvaluatorId WHERE Id=@Id";
-            var etkilenenSatir = connection.Execute(sql, new
+            try
             {
-                guncelKullanici.Ad,
-                guncelKullanici.Soyad,
-                guncelKullanici.Email,
-                guncelKullanici.Rol,
-                guncelKullanici.Departman,
-                guncelKullanici.EvaluatorId,
-                Id = id
-            });
-            if (etkilenenSatir == 0) return NotFound(new { mesaj = "Guncellenecek kullanici bulunamadi" });
+                var etkilenenSatir = connection.Execute("usp_Kullanicilar_Update", new
+                {
+                    Id = id,
+                    guncelKullanici.Ad,
+                    guncelKullanici.Soyad,
+                    guncelKullanici.Email,
+                    guncelKullanici.Rol,
+                    guncelKullanici.Departman,
+                    guncelKullanici.EvaluatorId
+                }, commandType: CommandType.StoredProcedure);
+
+                if (etkilenenSatir == 0) return NotFound(new { mesaj = "Guncellenecek kullanici bulunamadi" });
+            }
+            catch (SqlException ex)
+            {
+                return BadRequest(new { mesaj = ex.Message });
+            }
+
             return Ok(new { mesaj = "Kullanici basariyla guncellendi" });
         }
 
@@ -169,12 +155,15 @@ namespace ITPerformansAPI.Controllers
 
             using var connection = new SqlConnection(_connectionString);
 
-            var bagliCalisanSayisi = connection.ExecuteScalar<int>(
-                "SELECT COUNT(*) FROM Kullanicilar WHERE EvaluatorId = @Id", new { Id = id });
-            if (bagliCalisanSayisi > 0)
-                return BadRequest(new { mesaj = "Bu değerlendiriciye hâlâ bağlı çalışanlar var. Önce onları başka bir değerlendiriciye atayın." });
+            try
+            {
+                connection.Execute("usp_Kullanicilar_Delete", new { Id = id }, commandType: CommandType.StoredProcedure);
+            }
+            catch (SqlException ex)
+            {
+                return BadRequest(new { mesaj = ex.Message });
+            }
 
-            connection.Execute("DELETE FROM Kullanicilar WHERE Id=@Id", new { Id = id });
             return Ok(new { mesaj = "Kullanici silindi" });
         }
 
@@ -187,8 +176,16 @@ namespace ITPerformansAPI.Controllers
                 return BadRequest(new { mesaj = "Kendi hesabınızı pasife alamazsınız." });
 
             using var connection = new SqlConnection(_connectionString);
-            var sql = "UPDATE Kullanicilar SET AktifMi = @AktifMi WHERE Id = @Id";
-            connection.Execute(sql, new { AktifMi = aktifMi, Id = id });
+
+            try
+            {
+                connection.Execute("usp_Kullanicilar_AktifPasifYap", new { Id = id, AktifMi = aktifMi }, commandType: CommandType.StoredProcedure);
+            }
+            catch (SqlException ex)
+            {
+                return BadRequest(new { mesaj = ex.Message });
+            }
+
             return Ok(new { mesaj = aktifMi ? "Kullanici aktif edildi" : "Kullanici pasif edildi" });
         }
     }
