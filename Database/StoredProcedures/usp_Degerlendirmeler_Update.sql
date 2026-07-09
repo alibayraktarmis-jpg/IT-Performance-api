@@ -1,3 +1,5 @@
+-- Ayni calisan+donem icin baska bir degerlendirme zaten varsa gunellemeyi engeller
+-- (usp_Degerlendirmeler_Create'deki ayni kural, duzenleme tarafinda da uygulanir).
 CREATE OR ALTER PROCEDURE usp_Degerlendirmeler_Update
     @Id INT,
     @DegerlendiricId INT,
@@ -9,6 +11,13 @@ CREATE OR ALTER PROCEDURE usp_Degerlendirmeler_Update
 AS
 BEGIN
     SET NOCOUNT ON;
+
+    IF EXISTS (SELECT 1 FROM Degerlendirmeler WHERE CalisanId = @CalisanId AND Donem = @Donem AND Id <> @Id)
+    BEGIN
+        RAISERROR('Bu calisan icin bu doneme ait baska bir degerlendirme zaten mevcut.', 16, 1);
+        RETURN;
+    END
+
     UPDATE Degerlendirmeler
     SET DegerlendiricId = @DegerlendiricId, CalisanId = @CalisanId, Tarih = @Tarih,
         Donem = @Donem, Yorum = @Yorum, ToplamSkor = @ToplamSkor

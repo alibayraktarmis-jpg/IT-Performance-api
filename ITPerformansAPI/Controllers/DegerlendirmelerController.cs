@@ -142,7 +142,14 @@ namespace ITPerformansAPI.Controllers
             parametreler.Add("YeniId", dbType: DbType.Int32, direction: ParameterDirection.Output);
             parametreler.Add("MevcutId", dbType: DbType.Int32, direction: ParameterDirection.Output);
 
-            connection.Execute("usp_Degerlendirmeler_Create", parametreler, commandType: CommandType.StoredProcedure);
+            try
+            {
+                connection.Execute("usp_Degerlendirmeler_Create", parametreler, commandType: CommandType.StoredProcedure);
+            }
+            catch (SqlException ex)
+            {
+                return BadRequest(new { mesaj = ex.Message });
+            }
 
             var mevcutId = parametreler.Get<int?>("MevcutId");
             if (mevcutId != null)
@@ -178,16 +185,23 @@ namespace ITPerformansAPI.Controllers
 
             // Toplam skor burada da client'tan degil, kayitli detaylardan sunucuda hesaplanir
             var hesaplananSkor = SkorHesaplayici.Hesapla(connection, id);
-            connection.Execute("usp_Degerlendirmeler_Update", new
+            try
             {
-                Id = id,
-                guncellendi.DegerlendiricId,
-                guncellendi.CalisanId,
-                guncellendi.Tarih,
-                guncellendi.Donem,
-                guncellendi.Yorum,
-                ToplamSkor = hesaplananSkor
-            }, commandType: CommandType.StoredProcedure);
+                connection.Execute("usp_Degerlendirmeler_Update", new
+                {
+                    Id = id,
+                    guncellendi.DegerlendiricId,
+                    guncellendi.CalisanId,
+                    guncellendi.Tarih,
+                    guncellendi.Donem,
+                    guncellendi.Yorum,
+                    ToplamSkor = hesaplananSkor
+                }, commandType: CommandType.StoredProcedure);
+            }
+            catch (SqlException ex)
+            {
+                return BadRequest(new { mesaj = ex.Message });
+            }
 
             return Ok(new { mesaj = "Degerlendirme guncellendi", toplamSkor = hesaplananSkor });
         }

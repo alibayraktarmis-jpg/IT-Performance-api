@@ -1,5 +1,5 @@
--- Yeni kullanici ekler. Rol Employee ve bir degerlendirici secilmisse,
--- o degerlendiricinin var/aktif/ayni departmanda oldugunu dogrular.
+-- Yeni kullanici ekler. Email benzersiz olmali. Rol Employee ve bir degerlendirici
+-- secilmisse, o degerlendiricinin var/aktif/ayni departmanda oldugunu dogrular.
 CREATE OR ALTER PROCEDURE usp_Kullanicilar_Create
     @Ad NVARCHAR(100),
     @Soyad NVARCHAR(100),
@@ -11,6 +11,12 @@ CREATE OR ALTER PROCEDURE usp_Kullanicilar_Create
 AS
 BEGIN
     SET NOCOUNT ON;
+
+    IF EXISTS (SELECT 1 FROM Kullanicilar WHERE Email = @Email)
+    BEGIN
+        RAISERROR('Bu email adresi zaten kullaniliyor.', 16, 1);
+        RETURN;
+    END
 
     IF @Rol = 'Employee' AND @EvaluatorId IS NOT NULL
     BEGIN

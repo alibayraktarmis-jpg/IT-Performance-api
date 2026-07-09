@@ -25,6 +25,18 @@ namespace ITPerformansAPI.Controllers
         public IActionResult GetByDegerlendirme(int degerlendirmeId)
         {
             using var connection = new SqlConnection(_connectionString);
+
+            var calisanId = connection.QueryFirstOrDefault<int?>(
+                "usp_Degerlendirmeler_GetCalisanId", new { Id = degerlendirmeId },
+                commandType: CommandType.StoredProcedure);
+            if (calisanId == null) return NotFound();
+
+            var rol = User.FindFirst(ClaimTypes.Role)?.Value;
+            var kullaniciId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
+            var kendiKaydiMi = rol == "Employee" && calisanId == kullaniciId;
+            if (!kendiKaydiMi && !ErisimKontrol.EvaluatorKendiEkibindeMi(connection, User, calisanId.Value))
+                return Forbid();
+
             var liste = connection.Query<DegerlendirmeDetay>(
                 "usp_DegerlendirmeDetaylar_GetByDegerlendirme", new { DegerlendirmeId = degerlendirmeId },
                 commandType: CommandType.StoredProcedure).ToList();

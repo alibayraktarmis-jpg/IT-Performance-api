@@ -1,3 +1,4 @@
+-- CalisanId gercekten Employee rolunde bir kullanici olmali (Evaluator/Admin degerlendirilemez).
 -- Ayni calisan+donem icin degerlendirme zaten varsa eklemez, mevcut Id'yi
 -- @MevcutId ciktisinda doner (cagiran taraf bunu 409 Conflict olarak yorumlar).
 CREATE OR ALTER PROCEDURE usp_Degerlendirmeler_Create
@@ -11,6 +12,12 @@ CREATE OR ALTER PROCEDURE usp_Degerlendirmeler_Create
 AS
 BEGIN
     SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM Kullanicilar WHERE Id = @CalisanId AND Rol = 'Employee')
+    BEGIN
+        RAISERROR('Degerlendirme sadece Employee rolundeki kullanicilar icin olusturulabilir.', 16, 1);
+        RETURN;
+    END
 
     SELECT @MevcutId = Id FROM Degerlendirmeler WHERE CalisanId = @CalisanId AND Donem = @Donem;
     IF @MevcutId IS NOT NULL

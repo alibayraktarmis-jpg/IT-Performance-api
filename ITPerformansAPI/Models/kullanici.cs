@@ -19,5 +19,9 @@
 
         public int? EvaluatorId { get; set; }
 
+        public DateTime? KayitTarihi { get; set; }
+
+        public DateTime? SonGirisTarihi { get; set; }
+
     }
 }

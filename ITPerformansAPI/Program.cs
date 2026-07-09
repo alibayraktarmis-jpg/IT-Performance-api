@@ -114,9 +114,15 @@ app.Use(async (context, next) =>
         context.Response.StatusCode = StatusCodes.Status409Conflict;
         await context.Response.WriteAsJsonAsync(new { mesaj = "Bu kayit, iliskili baska kayitlar oldugu icin silinemedi veya guncellenemedi." });
     }
+    catch (Microsoft.Data.SqlClient.SqlException sqlEx) when (sqlEx.Number == 2601 || sqlEx.Number == 2627)
+    {
+        context.Response.StatusCode = StatusCodes.Status409Conflict;
+        await context.Response.WriteAsJsonAsync(new { mesaj = "Bu kayit zaten mevcut (benzersizlik kurali ihlal edildi)." });
+    }
 });
 
 app.UseAuthentication();
+app.UseMiddleware<ITPerformansAPI.Helpers.AktifKullaniciMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();

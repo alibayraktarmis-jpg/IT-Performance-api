@@ -41,10 +41,17 @@ namespace ITPerformansAPI.Controllers
             using var connection = new SqlConnection(_connectionString);
             if (!CalisanErisimVarMi(connection, yeni.CalisanId)) return Forbid();
 
-            var yeniId = connection.ExecuteScalar<int>(
-                "usp_Hedefler_Create", new { yeni.CalisanId, yeni.Aciklama, yeni.BitisTarihi },
-                commandType: CommandType.StoredProcedure);
-            return Ok(new { mesaj = "Hedef eklendi", id = yeniId });
+            try
+            {
+                var yeniId = connection.ExecuteScalar<int>(
+                    "usp_Hedefler_Create", new { yeni.CalisanId, yeni.Aciklama, yeni.BitisTarihi },
+                    commandType: CommandType.StoredProcedure);
+                return Ok(new { mesaj = "Hedef eklendi", id = yeniId });
+            }
+            catch (SqlException ex)
+            {
+                return BadRequest(new { mesaj = ex.Message });
+            }
         }
 
         [HttpPut("{id}")]

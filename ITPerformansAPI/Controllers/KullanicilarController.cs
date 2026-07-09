@@ -82,6 +82,11 @@ namespace ITPerformansAPI.Controllers
 
             if (!kullanici.AktifMi) return Unauthorized(new { mesaj = "Hesabınız pasife alınmış. Yöneticinizle iletişime geçin." });
 
+            // Yanitta bir onceki girisin tarihi donulur (bu giristen hemen once); sonra
+            // veritabani bu girisin zamaniyla guncellenir (bir sonraki giris icin referans olsun).
+            var oncekiGiris = kullanici.SonGirisTarihi;
+            connection.Execute("usp_Kullanicilar_SonGirisGuncelle", new { kullanici.Id }, commandType: CommandType.StoredProcedure);
+
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]!));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
@@ -107,8 +112,11 @@ namespace ITPerformansAPI.Controllers
                 kullanici.Id,
                 kullanici.Ad,
                 kullanici.Soyad,
+                kullanici.Email,
                 kullanici.Rol,
-                kullanici.Departman
+                kullanici.Departman,
+                kullanici.KayitTarihi,
+                sonGirisTarihi = oncekiGiris
             });
         }
 
@@ -187,6 +195,32 @@ namespace ITPerformansAPI.Controllers
             }
 
             return Ok(new { mesaj = aktifMi ? "Kullanici aktif edildi" : "Kullanici pasif edildi" });
+        }
+
+        [HttpPut("sifre-degistir")]
+        [Authorize]
+        public IActionResult SifreDegistir([FromBody] SifreDegistirDto dto)
+        {
+            if (string.IsNullOrWhiteSpace(dto.YeniSifre) || dto.YeniSifre.Length < 6)
+                return BadRequest(new { mesaj = "Yeni şifre en az 6 karakter olmalıdır." });
+
+            var kullaniciId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
+
+            using var connection = new SqlConnection(_connectionString);
+
+            var mevcutHash = connection.QueryFirstOrDefault<string>(
+                "usp_Kullanicilar_GetSifreHash", new { Id = kullaniciId },
+                commandType: CommandType.StoredProcedure);
+
+            if (mevcutHash == null || !BCrypt.Net.BCrypt.Verify(dto.MevcutSifre, mevcutHash))
+                return BadRequest(new { mesaj = "Mevcut şifre yanlış." });
+
+            var yeniHash = BCrypt.Net.BCrypt.HashPassword(dto.YeniSifre);
+            connection.Execute("usp_Kullanicilar_SifreDegistir",
+                new { Id = kullaniciId, YeniSifre = yeniHash },
+                commandType: CommandType.StoredProcedure);
+
+            return Ok(new { mesaj = "Şifreniz başarıyla değiştirildi." });
         }
     }
 }
