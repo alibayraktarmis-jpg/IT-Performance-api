@@ -21,7 +21,7 @@ BEGIN
     END
     ELSE
     BEGIN
-        SELECT Id, Ad, Soyad, Email, Rol, Departman, AktifMi, EvaluatorId
+        SELECT Id, Ad, Soyad, Email, Rol, Departman, AktifMi, EvaluatorId, SonGirisTarihi, SonAktiflikZamani
         FROM Kullanicilar;
     END
 END

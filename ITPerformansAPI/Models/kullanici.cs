@@ -23,5 +23,7 @@
 
         public DateTime? SonGirisTarihi { get; set; }
 
+        public DateTime? SonAktiflikZamani { get; set; }
+
     }
 }

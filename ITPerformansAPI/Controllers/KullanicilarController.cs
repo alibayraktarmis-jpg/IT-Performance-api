@@ -3,9 +3,11 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Dapper;
 using ITPerformansAPI.Models;
+using ITPerformansAPI.Helpers;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using System.Data;
 
@@ -221,6 +223,61 @@ namespace ITPerformansAPI.Controllers
                 commandType: CommandType.StoredProcedure);
 
             return Ok(new { mesaj = "Şifreniz başarıyla değiştirildi." });
+        }
+
+        [HttpPost("sifremi-unuttum")]
+        public IActionResult SifremiUnuttum([FromBody] SifremiUnuttumDto dto)
+        {
+            using var connection = new SqlConnection(_connectionString);
+
+            var kullanici = connection.QueryFirstOrDefault<Kullanici>(
+                "usp_Kullanicilar_GetByEmail", new { Email = dto.Email },
+                commandType: CommandType.StoredProcedure);
+
+            if (kullanici != null && kullanici.AktifMi)
+            {
+                var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+                    .Replace("+", "-").Replace("/", "_").Replace("=", "");
+
+                connection.Execute("usp_SifreSifirlama_TokenOlustur",
+                    new { KullaniciId = kullanici.Id, Token = token, GecerlilikDakika = 15 },
+                    commandType: CommandType.StoredProcedure);
+
+                var link = $"{_configuration["FrontendUrl"]}/sifre-sifirla?token={token}";
+                try
+                {
+                    EmailGonderici.SifreSifirlamaMailiGonder(_configuration, kullanici.Email, link);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Sifre sifirlama maili gonderilemedi: {ex.Message}");
+                }
+            }
+
+            return Ok(new { mesaj = "Eğer bu email adresi sistemde kayıtlıysa, şifre sıfırlama bağlantısı gönderildi." });
+        }
+
+        [HttpPost("sifre-sifirla")]
+        public IActionResult SifreSifirla([FromBody] SifreSifirlaDto dto)
+        {
+            if (string.IsNullOrWhiteSpace(dto.YeniSifre) || dto.YeniSifre.Length < 6)
+                return BadRequest(new { mesaj = "Yeni şifre en az 6 karakter olmalıdır." });
+
+            using var connection = new SqlConnection(_connectionString);
+            var yeniHash = BCrypt.Net.BCrypt.HashPassword(dto.YeniSifre);
+
+            var parametreler = new DynamicParameters();
+            parametreler.Add("Token", dto.Token);
+            parametreler.Add("YeniSifreHash", yeniHash);
+            parametreler.Add("BasariliMi", dbType: DbType.Boolean, direction: ParameterDirection.Output);
+
+            connection.Execute("usp_SifreSifirlama_SifreyiSifirla", parametreler, commandType: CommandType.StoredProcedure);
+
+            var basarili = parametreler.Get<bool>("BasariliMi");
+            if (!basarili)
+                return BadRequest(new { mesaj = "Bağlantı geçersiz veya süresi dolmuş. Lütfen şifremi unuttum işlemini tekrar başlatın." });
+
+            return Ok(new { mesaj = "Şifreniz başarıyla sıfırlandı. Şimdi giriş yapabilirsiniz." });
         }
     }
 }
