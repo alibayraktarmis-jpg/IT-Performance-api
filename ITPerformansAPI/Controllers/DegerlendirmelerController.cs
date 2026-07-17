@@ -72,10 +72,12 @@ namespace ITPerformansAPI.Controllers
         [Authorize(Roles = "Admin,Evaluator")]
         public IActionResult UpdateDetaylar(int id, [FromBody] UpdateDetaylarDto dto)
         {
-            if (dto.Detaylar.Any(d => d.Puan < 1 || d.Puan > 5))
+            var detaylar = dto.Detaylar ?? new List<DetayItem>();
+            if (detaylar.Any(d => d.Puan < 1 || d.Puan > 5))
                 return BadRequest(new { mesaj = "Puanlar 1 ile 5 arasinda olmalidir." });
 
             using var connection = new SqlConnection(_connectionString);
+            connection.Open();
 
             var calisanId = connection.QueryFirstOrDefault<int?>(
                 "usp_Degerlendirmeler_GetCalisanId", new { Id = id },
@@ -85,24 +87,27 @@ namespace ITPerformansAPI.Controllers
             var erisimHatasi = CalisanErisimKontrolu(connection, calisanId.Value);
             if (erisimHatasi != null) return erisimHatasi;
 
-            connection.Execute("usp_Degerlendirmeler_DetaylarSil", new { DegerlendirmeId = id }, commandType: CommandType.StoredProcedure);
-            foreach (var d in dto.Detaylar)
+            using var transaction = connection.BeginTransaction();
+
+            connection.Execute("usp_Degerlendirmeler_DetaylarSil", new { DegerlendirmeId = id },
+                transaction, commandType: CommandType.StoredProcedure);
+            foreach (var d in detaylar)
             {
                 connection.Execute("usp_DegerlendirmeDetaylar_Create",
                     new { DegerlendirmeId = id, d.AltKriterId, d.Puan },
-                    commandType: CommandType.StoredProcedure);
+                    transaction, commandType: CommandType.StoredProcedure);
             }
 
-            // Toplam skor istemciden gelen degerle degil, kaydedilen detaylardan sunucuda yeniden hesaplanir
-            var hesaplananSkor = SkorHesaplayici.Hesapla(connection, id);
+            var hesaplananSkor = SkorHesaplayici.Hesapla(connection, id, transaction);
             connection.Execute("usp_Degerlendirmeler_UpdateYorumSkor",
                 new { Id = id, dto.Yorum, ToplamSkor = hesaplananSkor, Tarih = DateTime.Now },
-                commandType: CommandType.StoredProcedure);
+                transaction, commandType: CommandType.StoredProcedure);
+
+            transaction.Commit();
 
             return Ok(new { mesaj = "Degerlendirme guncellendi", toplamSkor = hesaplananSkor });
         }
 
-        // Employee sadece kendi verisine, Evaluator sadece kendi ekibindeki calisanlara, Admin ise herkese erisebilir
         private IActionResult? CalisanErisimKontrolu(SqlConnection connection, int calisanId)
         {
             var rol = User.FindFirst(ClaimTypes.Role)?.Value;
@@ -183,7 +188,6 @@ namespace ITPerformansAPI.Controllers
             if (rol == "Evaluator")
                 guncellendi.DegerlendiricId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
 
-            // Toplam skor burada da client'tan degil, kayitli detaylardan sunucuda hesaplanir
             var hesaplananSkor = SkorHesaplayici.Hesapla(connection, id);
             try
             {
@@ -234,17 +238,14 @@ namespace ITPerformansAPI.Controllers
                 "usp_Degerlendirmeler_KategoriDetay", new { CalisanId = calisanId, Donem = donem },
                 commandType: CommandType.StoredProcedure).ToList();
 
-            double toplamSkor = 0;
-            foreach (var kategori in kategoriSkorlar)
-            {
-                double kategorSkor = (kategori.agirlikYuzdesi / 100.0) * (kategori.ortalamaPuan / 5.0) * 100.0;
-                toplamSkor += kategorSkor;
-            }
+            var toplamSkor = connection.ExecuteScalar<double?>(
+                "usp_Degerlendirmeler_OrtalamaSkor", new { CalisanId = calisanId, Donem = donem },
+                commandType: CommandType.StoredProcedure);
 
             return Ok(new
             {
                 calisanId,
-                toplamSkor = Math.Round(toplamSkor, 2),
+                toplamSkor = Math.Round(toplamSkor ?? 0, 2),
                 kategoriDetay = kategoriSkorlar
             });
         }
@@ -258,6 +259,17 @@ namespace ITPerformansAPI.Controllers
             using var connection = new SqlConnection(_connectionString);
             var sonuc = connection.Query(
                 "usp_Degerlendirmeler_GetSiralama", new { Rol = rol, KullaniciId = kullaniciId, Donem = donem },
+                commandType: CommandType.StoredProcedure).ToList();
+            return Ok(sonuc);
+        }
+
+        [HttpGet("departman-ozet")]
+        [Authorize(Roles = "Admin")]
+        public IActionResult GetDepartmanOzet([FromQuery] string? donem = null)
+        {
+            using var connection = new SqlConnection(_connectionString);
+            var sonuc = connection.Query(
+                "usp_Degerlendirmeler_DepartmanOzet", new { Donem = string.IsNullOrEmpty(donem) ? null : donem },
                 commandType: CommandType.StoredProcedure).ToList();
             return Ok(sonuc);
         }
@@ -322,7 +334,6 @@ namespace ITPerformansAPI.Controllers
 
             using var paket = new OfficeOpenXml.ExcelPackage();
 
-            // Sayfa 1: Genel Sıralama
             var s1 = paket.Workbook.Worksheets.Add("Genel Sıralama");
             s1.Cells[1, 1].Value = "Ad Soyad";
             s1.Cells[1, 2].Value = "Departman";
@@ -348,7 +359,6 @@ namespace ITPerformansAPI.Controllers
             s1.View.FreezePanes(2, 1);
             s1.Cells[s1.Dimension.Address].AutoFitColumns();
 
-            // Sayfa 2: Departman Özeti
             var s2 = paket.Workbook.Worksheets.Add("Departman Özeti");
             s2.Cells[1, 1].Value = "Departman";
             s2.Cells[1, 2].Value = "Çalışan Sayısı";
@@ -375,7 +385,6 @@ namespace ITPerformansAPI.Controllers
             s2.View.FreezePanes(2, 1);
             s2.Cells[s2.Dimension.Address].AutoFitColumns();
 
-            // Sayfa 3: Kategori Puanları
             if (kategoriler.Count > 0)
             {
                 var s3 = paket.Workbook.Worksheets.Add("Kategori Puanları");

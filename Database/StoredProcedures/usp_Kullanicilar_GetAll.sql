@@ -1,5 +1,3 @@
--- Rol bazli kullanici listesi: Evaluator sadece kendi ekibini, Employee sadece kendini,
--- Admin ise herkesi gorur.
 CREATE OR ALTER PROCEDURE usp_Kullanicilar_GetAll
     @Rol NVARCHAR(50),
     @KullaniciId INT

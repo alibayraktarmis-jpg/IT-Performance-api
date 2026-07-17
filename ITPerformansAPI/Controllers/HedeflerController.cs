@@ -38,6 +38,11 @@ namespace ITPerformansAPI.Controllers
         [Authorize(Roles = "Admin,Evaluator")]
         public IActionResult CreateHedef([FromBody] Hedef yeni)
         {
+            if (string.IsNullOrWhiteSpace(yeni.Aciklama))
+                return BadRequest(new { mesaj = "Hedef açıklaması boş olamaz." });
+            if (yeni.BitisTarihi.Date < DateTime.Now.Date)
+                return BadRequest(new { mesaj = "Bitiş tarihi geçmiş bir gün olamaz." });
+
             using var connection = new SqlConnection(_connectionString);
             if (!CalisanErisimVarMi(connection, yeni.CalisanId)) return Forbid();
 
@@ -58,6 +63,9 @@ namespace ITPerformansAPI.Controllers
         [Authorize(Roles = "Admin,Evaluator")]
         public IActionResult UpdateHedef(int id, [FromBody] Hedef guncellendi)
         {
+            if (string.IsNullOrWhiteSpace(guncellendi.Aciklama))
+                return BadRequest(new { mesaj = "Hedef açıklaması boş olamaz." });
+
             using var connection = new SqlConnection(_connectionString);
             if (!HedefeErisimVarMi(connection, id)) return Forbid();
 
@@ -87,7 +95,6 @@ namespace ITPerformansAPI.Controllers
             return Ok(new { mesaj = "Geri alındı" });
         }
 
-        // Admin her calisana/hedefe, Evaluator sadece kendi ekibindeki calisanlara/hedeflere erisebilir
         private bool CalisanErisimVarMi(SqlConnection connection, int calisanId)
             => ErisimKontrol.EvaluatorKendiEkibindeMi(connection, User, calisanId);
 

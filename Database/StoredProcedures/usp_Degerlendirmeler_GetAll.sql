@@ -1,5 +1,3 @@
--- Rol bazli degerlendirme listesi: Admin hepsini, Evaluator kendi yaptigi
--- degerlendirmeleri, Employee kendisine ait degerlendirmeleri gorur.
 CREATE OR ALTER PROCEDURE usp_Degerlendirmeler_GetAll
     @Rol NVARCHAR(50),
     @KullaniciId INT

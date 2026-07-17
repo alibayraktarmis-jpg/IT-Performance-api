@@ -1,5 +1,3 @@
--- Bir degerlendirmenin toplam skorunu, kayitli DegerlendirmeDetaylar satirlarindan
--- (ana kriter agirligi x alt kriter puan ortalamasi) formuluyle hesaplar. Kaydetmez.
 CREATE OR ALTER PROCEDURE usp_Degerlendirmeler_SkorHesapla
     @DegerlendirmeId INT,
     @Skor FLOAT OUTPUT

@@ -1,4 +1,3 @@
--- Iki sonuc kumesi doner: 1) o donemin degerlendirmesi (varsa), 2) onun detaylari.
 CREATE OR ALTER PROCEDURE usp_Degerlendirmeler_GetByCalisanDonem
     @CalisanId INT,
     @Donem NVARCHAR(50)
@@ -16,5 +15,13 @@ BEGIN
     WHERE CalisanId = @CalisanId AND Donem = @Donem
     ORDER BY Id DESC;
 
-    SELECT * FROM DegerlendirmeDetaylar WHERE DegerlendirmeId = @DegerlendirmeId;
+    -- Alt kriter adi ve ana baslik adi da eklendi; Employee'nin Gecmis sayfasinda
+    -- donem satirini actiginda kriter bazli kirilim gosterebilmesi icin.
+    SELECT dd.Id, dd.DegerlendirmeId, dd.AltKriterId, dd.Puan,
+           ak.KriterAdi, ab.Baslik AS AnaBaslikAdi
+    FROM DegerlendirmeDetaylar dd
+    INNER JOIN AltKriterler ak ON dd.AltKriterId = ak.Id
+    INNER JOIN AnaBasliklar ab ON ak.AnaBaslikId = ab.Id
+    WHERE dd.DegerlendirmeId = @DegerlendirmeId
+    ORDER BY ab.Id, ak.Id;
 END

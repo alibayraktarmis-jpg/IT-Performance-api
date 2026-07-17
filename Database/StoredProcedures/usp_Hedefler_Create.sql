@@ -1,4 +1,3 @@
--- CalisanId gercekten Employee rolunde bir kullanici olmali (Evaluator/Admin'e hedef atanamaz).
 CREATE OR ALTER PROCEDURE usp_Hedefler_Create
     @CalisanId INT,
     @Aciklama NVARCHAR(1000),

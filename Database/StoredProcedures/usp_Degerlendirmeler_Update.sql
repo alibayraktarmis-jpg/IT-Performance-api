@@ -1,5 +1,3 @@
--- Ayni calisan+donem icin baska bir degerlendirme zaten varsa gunellemeyi engeller
--- (usp_Degerlendirmeler_Create'deki ayni kural, duzenleme tarafinda da uygulanir).
 CREATE OR ALTER PROCEDURE usp_Degerlendirmeler_Update
     @Id INT,
     @DegerlendiricId INT,

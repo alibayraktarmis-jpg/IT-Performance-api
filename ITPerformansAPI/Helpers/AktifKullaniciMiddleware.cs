@@ -5,10 +5,6 @@ using Microsoft.Data.SqlClient;
 
 namespace ITPerformansAPI.Helpers
 {
-    // JWT gecerli olsa bile, hesap sonradan pasife alinmis/silinmis ya da rolu degistirilmis
-    // olabilir. Bu middleware her authenticated istekte kullaniciyi DB'den kontrol eder;
-    // aksi halde pasife alma veya rol degisikligi, mevcut token suresi (8 saat) dolana kadar
-    // etkisiz kalirdi (token'daki eski rol claim'i ile ayricalikli islemler yapilabilirdi).
     public class AktifKullaniciMiddleware
     {
         private readonly RequestDelegate _next;

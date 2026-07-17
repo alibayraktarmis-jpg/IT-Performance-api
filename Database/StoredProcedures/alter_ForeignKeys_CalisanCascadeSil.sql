@@ -1,11 +1,3 @@
--- Bir Employee silindiginde ona ait Hedefler ve Degerlendirmeler (ve degerlendirmelerin
--- DegerlendirmeDetaylar satirlari) otomatik silinsin diye CASCADE'e cevrilir.
--- Degerlendirmeler.DegerlendiricId NO_ACTION olarak kalir (SQL Server ayni tabloya
--- Kullanicilar -> Degerlendirmeler icin iki cascade yolu tanimlamaya izin vermiyor).
--- Bir Evaluator silindiginde onun yaptigi degerlendirmelerin DegerlendiricId'si
--- usp_Kullanicilar_Delete icinde elle NULL'lanir, boylece degerlendirme (puan/yorum/
--- donem/calisan) korunur, sadece "kim degerlendirdi" bilgisi bosalir.
-
 IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK__Hedefler__Calisa__2CF2ADDF')
 BEGIN
     ALTER TABLE Hedefler DROP CONSTRAINT [FK__Hedefler__Calisa__2CF2ADDF];

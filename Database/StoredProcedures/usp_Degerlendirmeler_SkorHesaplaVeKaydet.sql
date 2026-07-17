@@ -1,4 +1,3 @@
--- Skoru hesaplar ve Degerlendirmeler.ToplamSkor kolonuna yazar.
 CREATE OR ALTER PROCEDURE usp_Degerlendirmeler_SkorHesaplaVeKaydet
     @DegerlendirmeId INT,
     @Skor FLOAT OUTPUT

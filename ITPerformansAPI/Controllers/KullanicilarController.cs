@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Data.SqlClient;
 using Dapper;
 using ITPerformansAPI.Models;
@@ -19,11 +20,13 @@ namespace ITPerformansAPI.Controllers
     {
         private readonly string _connectionString;
         private readonly IConfiguration _configuration;
+        private readonly IWebHostEnvironment _env;
 
-        public KullanicilarController(IConfiguration configuration)
+        public KullanicilarController(IConfiguration configuration, IWebHostEnvironment env)
         {
             _connectionString = configuration.GetConnectionString("DefaultConnection")!;
             _configuration = configuration;
+            _env = env;
         }
 
         [HttpGet]
@@ -70,6 +73,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpPost("login")]
+        [EnableRateLimiting("giris")]
         public IActionResult Login([FromBody] LoginDto loginDto)
         {
             using var connection = new SqlConnection(_connectionString);
@@ -84,8 +88,6 @@ namespace ITPerformansAPI.Controllers
 
             if (!kullanici.AktifMi) return Unauthorized(new { mesaj = "Hesabınız pasife alınmış. Yöneticinizle iletişime geçin." });
 
-            // Yanitta bir onceki girisin tarihi donulur (bu giristen hemen once); sonra
-            // veritabani bu girisin zamaniyla guncellenir (bir sonraki giris icin referans olsun).
             var oncekiGiris = kullanici.SonGirisTarihi;
             connection.Execute("usp_Kullanicilar_SonGirisGuncelle", new { kullanici.Id }, commandType: CommandType.StoredProcedure);
 
@@ -226,6 +228,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpPost("sifremi-unuttum")]
+        [EnableRateLimiting("sifre-unuttum")]
         public IActionResult SifremiUnuttum([FromBody] SifremiUnuttumDto dto)
         {
             using var connection = new SqlConnection(_connectionString);
@@ -244,6 +247,10 @@ namespace ITPerformansAPI.Controllers
                     commandType: CommandType.StoredProcedure);
 
                 var link = $"{_configuration["FrontendUrl"]}/sifre-sifirla?token={token}";
+
+                if (_env.IsDevelopment())
+                    Console.WriteLine($"[DEV] Sifre sifirlama linki ({kullanici.Email}): {link}");
+
                 try
                 {
                     EmailGonderici.SifreSifirlamaMailiGonder(_configuration, kullanici.Email, link);
@@ -258,6 +265,7 @@ namespace ITPerformansAPI.Controllers
         }
 
         [HttpPost("sifre-sifirla")]
+        [EnableRateLimiting("giris")]
         public IActionResult SifreSifirla([FromBody] SifreSifirlaDto dto)
         {
             if (string.IsNullOrWhiteSpace(dto.YeniSifre) || dto.YeniSifre.Length < 6)

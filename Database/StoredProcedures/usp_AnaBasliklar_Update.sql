@@ -1,6 +1,3 @@
--- Agirlik dogrulamasinin ardindan gunceller. Ana kriter pasife alinirsa
--- altindaki tum alt kriterler de pasife alinir; aktiflestirmede ise
--- alt kriterlerin (bilerek pasif birakilmis olabilecek) durumuna dokunulmaz.
 CREATE OR ALTER PROCEDURE usp_AnaBasliklar_Update
     @Id INT,
     @Baslik NVARCHAR(200),

@@ -1,5 +1,3 @@
--- Kullaniciyi aktif/pasif yapar. Pasife alinacak kisi bir Evaluator ise ve hala
--- bagli calisani varsa islemi engeller.
 CREATE OR ALTER PROCEDURE usp_Kullanicilar_AktifPasifYap
     @Id INT,
     @AktifMi BIT

@@ -1,5 +1,3 @@
--- Rol bazli hedef listesi: Admin herkesi, Evaluator sadece kendi ekibini,
--- Employee sadece kendi hedeflerini gorur.
 CREATE OR ALTER PROCEDURE usp_Hedefler_GetAll
     @Rol NVARCHAR(50),
     @KullaniciId INT

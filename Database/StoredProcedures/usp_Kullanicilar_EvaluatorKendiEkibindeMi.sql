@@ -1,4 +1,3 @@
--- Bir calisanin, belirtilen degerlendiricinin ekibinde olup olmadigini kontrol eder.
 CREATE OR ALTER PROCEDURE usp_Kullanicilar_EvaluatorKendiEkibindeMi
     @CalisanId INT,
     @EvaluatorId INT

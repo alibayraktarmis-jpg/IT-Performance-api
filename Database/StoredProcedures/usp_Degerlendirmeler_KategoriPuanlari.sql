@@ -1,4 +1,3 @@
--- Excel/PDF raporlari icin: her Employee'nin her aktif Ana Kriter'deki ortalama puani.
 CREATE OR ALTER PROCEDURE usp_Degerlendirmeler_KategoriPuanlari
     @Donem NVARCHAR(50) = NULL
 AS

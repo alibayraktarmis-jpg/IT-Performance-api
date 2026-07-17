@@ -1,4 +1,3 @@
--- Excel/PDF raporlari icin: sadece Employee'ler, secilen doneme (veya tumune) gore ortalama skor.
 CREATE OR ALTER PROCEDURE usp_Degerlendirmeler_RaporVerileri
     @Donem NVARCHAR(50) = NULL
 AS

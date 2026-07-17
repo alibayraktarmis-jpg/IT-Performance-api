@@ -7,8 +7,6 @@ namespace ITPerformansAPI.Helpers
 {
     public static class ErisimKontrol
     {
-        // Admin her zaman erisebilir. Evaluator ise sadece kendi ekibindeki
-        // (EvaluatorId'si kendisiyle eslesen) calisanlara erisebilir.
         public static bool EvaluatorKendiEkibindeMi(SqlConnection connection, ClaimsPrincipal user, int calisanId)
         {
             var rol = user.FindFirst(ClaimTypes.Role)?.Value;

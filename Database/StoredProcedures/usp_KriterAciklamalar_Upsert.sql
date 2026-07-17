@@ -1,4 +1,3 @@
--- Belirli bir alt kriter + rol icin aciklama varsa gunceller, yoksa (bos degilse) ekler.
 CREATE OR ALTER PROCEDURE usp_KriterAciklamalar_Upsert
     @AltKriterId INT,
     @Rol NVARCHAR(50),

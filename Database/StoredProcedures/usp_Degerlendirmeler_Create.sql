@@ -1,6 +1,3 @@
--- CalisanId gercekten Employee rolunde bir kullanici olmali (Evaluator/Admin degerlendirilemez).
--- Ayni calisan+donem icin degerlendirme zaten varsa eklemez, mevcut Id'yi
--- @MevcutId ciktisinda doner (cagiran taraf bunu 409 Conflict olarak yorumlar).
 CREATE OR ALTER PROCEDURE usp_Degerlendirmeler_Create
     @DegerlendiricId INT,
     @CalisanId INT,

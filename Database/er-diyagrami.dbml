@@ -1,0 +1,91 @@
+// IT Performans Değerlendirme Sistemi — ER Diyagramı (dbdiagram.io)
+// Canlı ITPerformansDB şemasından üretildi (2026-07-13).
+// Tablo/kolon adları, tipler ve FK'ler fiziksel şema ile birebir aynıdır.
+
+Table Kullanicilar {
+  Id int [pk, increment]
+  Ad nvarchar(50)
+  Soyad nvarchar(50)
+  Email nvarchar(100) [unique]
+  Rol nvarchar(50) [note: 'Admin | Evaluator | Employee']
+  Departman nvarchar(50)
+  Sifre nvarchar(255) [note: 'BCrypt hash']
+  AktifMi bit [not null]
+  EvaluatorId int [note: 'Uygulama düzeyinde ilişki; DB tarafında FK kısıtı yok']
+  KayitTarihi datetime [not null]
+  SonGirisTarihi datetime
+  SonAktiflikZamani datetime
+}
+
+Table AnaBasliklar {
+  Id int [pk, increment]
+  Baslik nvarchar(100) [not null]
+  AgirlikYuzdesi int [not null, note: 'Aktif başlıkların toplamı %100 sınırına SP ile bağlı']
+  AktifMi bit
+}
+
+Table AltKriterler {
+  Id int [pk, increment]
+  AnaBaslikId int
+  KriterAdi nvarchar(100) [not null]
+  AktifMi bit
+}
+
+Table KriterAciklamalar {
+  Id int [pk, increment]
+  AltKriterId int
+  Rol nvarchar(50) [not null, note: 'Analist | Yazılımcı | QA']
+  Aciklama nvarchar(500) [not null]
+}
+
+Table Degerlendirmeler {
+  Id int [pk, increment]
+  DegerlendiricId int
+  CalisanId int
+  Tarih date [not null]
+  Donem nvarchar(50) [note: 'Örn: "2026 Q3"']
+  Yorum nvarchar(max)
+  ToplamSkor float [note: 'Sunucuda detaylardan hesaplanır']
+
+  indexes {
+    (CalisanId, Donem) [unique, name: 'UQ_Degerlendirmeler_CalisanDonem']
+  }
+}
+
+Table DegerlendirmeDetaylar {
+  Id int [pk, increment]
+  DegerlendirmeId int
+  AltKriterId int
+  Puan int [not null, note: '1-5']
+}
+
+Table Hedefler {
+  Id int [pk, increment]
+  CalisanId int
+  Aciklama nvarchar(500)
+  BitisTarihi date
+  TamamlandiMi bit
+}
+
+Table SifreSifirlamaTokenlari {
+  Id int [pk, increment]
+  KullaniciId int [not null]
+  Token nvarchar(100) [not null, unique]
+  OlusturmaZamani datetime [not null]
+  SonKullanmaTarihi datetime [not null, note: '15 dk geçerlilik']
+  KullanildiMi bit [not null]
+}
+
+// ── İlişkiler (silme kurallarıyla, DB'deki FK'lerle birebir) ──
+Ref: AltKriterler.AnaBaslikId > AnaBasliklar.Id
+Ref: KriterAciklamalar.AltKriterId > AltKriterler.Id [delete: cascade]
+Ref: DegerlendirmeDetaylar.AltKriterId > AltKriterler.Id
+Ref: DegerlendirmeDetaylar.DegerlendirmeId > Degerlendirmeler.Id [delete: cascade]
+Ref: Degerlendirmeler.CalisanId > Kullanicilar.Id [delete: cascade]
+Ref: Degerlendirmeler.DegerlendiricId > Kullanicilar.Id
+Ref: Hedefler.CalisanId > Kullanicilar.Id [delete: cascade]
+Ref: SifreSifirlamaTokenlari.KullaniciId > Kullanicilar.Id [delete: cascade]
+
+// Uygulama düzeyinde yönetilen ilişki (DB'de FK kısıtı YOK — diyagramda
+// gösterim amaçlı): Evaluator, ekibindeki çalışanlara EvaluatorId ile bağlanır.
+Ref: Kullanicilar.EvaluatorId > Kullanicilar.Id

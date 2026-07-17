@@ -1,4 +1,3 @@
--- Sifre sifirlama baglantilari icin tek kullanimlik, sureli tokenlar.
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'SifreSifirlamaTokenlari')
 BEGIN
     CREATE TABLE SifreSifirlamaTokenlari (

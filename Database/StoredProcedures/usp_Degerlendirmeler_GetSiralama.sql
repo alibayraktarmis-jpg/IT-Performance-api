@@ -1,5 +1,3 @@
--- Rol bazli siralama: Admin herkesi, Evaluator sadece kendi ekibindeki Employee'leri,
--- Employee sadece kendisini gorur.
 CREATE OR ALTER PROCEDURE usp_Degerlendirmeler_GetSiralama
     @Rol NVARCHAR(50),
     @KullaniciId INT,

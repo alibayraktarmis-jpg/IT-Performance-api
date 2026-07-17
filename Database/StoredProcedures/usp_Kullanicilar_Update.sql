@@ -1,5 +1,3 @@
--- Kullaniciyi gunceller. Email benzersiz olmali. Rol Employee ve bir degerlendirici
--- secilmisse, o degerlendiricinin var/aktif/ayni departmanda oldugunu dogrular.
 CREATE OR ALTER PROCEDURE usp_Kullanicilar_Update
     @Id INT,
     @Ad NVARCHAR(100),

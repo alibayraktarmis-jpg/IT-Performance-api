@@ -59,7 +59,6 @@ namespace ITPerformansAPI.Controllers
                 new { yeni.DegerlendirmeId, yeni.AltKriterId, yeni.Puan },
                 commandType: CommandType.StoredProcedure);
 
-            // Yeni detay eklendikce ust degerlendirmenin toplam skoru sunucuda yeniden hesaplanir
             SkorHesaplayici.YenidenHesaplaVeKaydet(connection, yeni.DegerlendirmeId);
             return Ok("Eklendi");
         }
@@ -80,12 +79,10 @@ namespace ITPerformansAPI.Controllers
 
             connection.Execute("usp_DegerlendirmeDetaylar_Delete", new { Id = id }, commandType: CommandType.StoredProcedure);
 
-            // Detay silindikce ust degerlendirmenin toplam skoru sunucuda yeniden hesaplanir
             SkorHesaplayici.YenidenHesaplaVeKaydet(connection, degerlendirmeId.Value);
             return Ok("Silindi");
         }
 
-        // Admin her degerlendirmeye, Evaluator sadece kendi ekibindeki calisanlarin degerlendirmelerine erisebilir
         private IActionResult? DegerlendirmeErisimKontrolu(SqlConnection connection, int degerlendirmeId)
         {
             var rol = User.FindFirst(ClaimTypes.Role)?.Value;

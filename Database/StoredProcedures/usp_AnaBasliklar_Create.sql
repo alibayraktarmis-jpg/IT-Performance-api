@@ -1,4 +1,3 @@
--- Agirlik yuzdesi 0-100 araligi disinda olamaz; aktif ana kriterlerin toplami %100'u gecemez.
 CREATE OR ALTER PROCEDURE usp_AnaBasliklar_Create
     @Baslik NVARCHAR(200),
     @AgirlikYuzdesi INT,
